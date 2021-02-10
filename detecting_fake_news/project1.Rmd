@@ -1,0 +1,1453 @@
+---
+title: "Detecting Fake News - Politifact"
+author: "Kristen A, kka2120"
+date: "2/03/2021"
+output: 
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(scales)
+library(ggtext)
+library(tm)
+```
+
+```{r}
+politifact <- read_csv("raw-data/FakeNewsNet-master/Data/Cleaned_DSPP/politifact.csv")
+```
+
+```{r}
+politifact$year <- format(politifact$date_time, format = "%Y")
+politifact$month <- format(politifact$date_time, format = "%m")
+politifact$day <- format(politifact$date_time, format = "%d")
+```
+
+### Descriptive statistics
+
+fake(1) and real(0) news summary statistics
+
+![](/Users/kristenakey/Documents/QMSS/DSPP/detecting_fake_news_project1/output-data/summary-stats.png)
+
+- total_words -- average total number of words in an article
+- sent_length -- average number of sentences in article
+- num_word_unique -- average number of unique words in article
+- num_dict_word_unique -- average number of unique dictionary words in article
+- total_dict_words -- average total of dictionary words in an article
+
+- prop_uniq_dict - of dictionary words in an article, what proportion of the words are unique? (average)
+- prop_uniq - of total words in an article, what proportion of the words are unique? (average)
+- prop_dict_words - of total words in an article, what proportion of the words are in a dictionary? (average)
+
+
+*************************************
+
+```{r}
+stop_words <- data.frame(get_stopwords()$word)
+colnames(stop_words) <- "word"
+
+#and expanded stop_words list from Prof. Mattew L. Jockers
+source("/Users/kristenakey/Desktop/R/functions/expanded_stop_words.R")
+more_stop_words <- more_stop_words[c(20:length(more_stop_words))]
+more_stop_words <- data.frame(more_stop_words)
+colnames(more_stop_words) <- "word"
+stop_words <- rbind(stop_words, more_stop_words)
+```
+
+```{r}
+#sequence of articles
+politifact_seq <- politifact %>%
+  arrange(year, month) %>%
+  # filter(!is.na(year)) %>%
+  mutate(article_seq = row_number())
+
+#tokenize and remove stop words
+tidy_politifact_seq <- politifact_seq %>%
+  unnest_tokens(word, text) %>%
+  mutate(word = str_extract(word, "[a-z']+"),
+         word = str_replace_all(word, pattern="'", "")) %>%
+  anti_join(stop_words, by="word") 
+
+#stemming
+library(SnowballC)
+tidy_politifact_seq_stem <- tidy_politifact_seq %>%
+  mutate(word = wordStem(word))
+```
+
+```{r}
+tidy_politifact_seq_stem %>%
+  filter(fake==1, !is.na(word)) %>%
+  count(word, sort=T) %>%
+  mutate(prop = (n/sum(n)) ) %>%
+  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#9E5773") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top words in *Politifact* **fake** news articles</span>")
+```
+
+
+
+```{r}
+tidy_politifact_seq_stem %>%
+  filter(fake==0,  !is.na(word)) %>%
+  count(word, sort=T) %>%
+  head(10) %>%
+  # filter(n > 100) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#34344A") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top words in *Politifact* **real** news articles</span>")
+```
+
+
+**************************
+
+
+**What about Clinton?**
+```{r}
+tidy_politifact_seq_stem %>%
+  filter(!is.na(word)) %>%
+  group_by(fake) %>%
+  count(word, sort=T) %>%
+  # filter(word=="clinton")
+  filter(str_detect(word, "clint")) %>%
+  summarise(tot = sum(n))
+```
+
+Clinton was mentioned 42 times in real news and only 5 times in fake news.
+
+
+**************************
+
+
+```{r}
+#sequence of articles
+politifact_seq <- politifact %>%
+  arrange(year, month) %>%
+  # filter(!is.na(year)) %>%
+  mutate(article_seq = row_number())
+
+#tokenize and remove stop words
+tidy_politifact_seq <- politifact_seq %>%
+  unnest_tokens(word, text) %>%
+  mutate(word = str_extract(word, "[a-z']+"),
+         word = str_replace_all(word, pattern="'", "")) %>%
+  anti_join(stop_words, by="word") 
+
+#stemming
+library(SnowballC)
+tidy_politifact_seq_stem <- tidy_politifact_seq %>%
+  mutate(word = wordStem(word))
+```
+
+
+```{r}
+politifact %>%
+  group_by(fake) %>%
+  select(year, fake) %>%
+  count(year) %>%
+  arrange(year) %>%
+  ggplot(., aes(year,n, fill=as.factor(fake))) + 
+    geom_bar(stat = "identity") +
+    theme_classic() + 
+    scale_fill_manual(values=c("#34344A","#9E5773")) +
+  theme(plot.title = element_markdown(),
+        legend.position = "none") +
+  ggtitle(paste0("<span style = 'color:black'>","Distribution of *Politifact*</span>",
+      " <span style = 'color:#9E5773; font-size:14pt'>**fake**</span> ",
+      "<span style = 'color:black'>","and ","</span>",
+      "<span style = 'color:#34344A; font-size:14pt'>**real**</span> ",
+      "<span style = 'color:black'>",
+      "news articles by year</span>")) +
+  xlab("Year")
+```
+
+```{r}
+politifact %>%
+  group_by(fake) %>%
+  select(year,month, fake) %>%
+  count(year,month) %>%
+  arrange(year,month) %>%
+  mutate(year_month = paste0(year,"-",month),
+         year_month = ifelse(year_month=="NA-NA","NA",year_month)) %>%
+  ggplot(., aes(year_month,n, fill=as.factor(fake))) + 
+    geom_bar(stat = "identity") +
+    theme_classic() + 
+    scale_fill_manual(values=c("#34344A","#9E5773")) +
+  theme(plot.title = element_markdown(),
+        legend.position = "none"
+        ) +
+  ggtitle(paste0("<span style = 'color:black'>","Distribution of *Politifact*</span>",
+      " <span style = 'color:#9E5773; font-size:14pt'>**fake**</span> ",
+      "<span style = 'color:black'>","and ","</span>",
+      "<span style = 'color:#34344A; font-size:14pt'>**real**</span> ",
+      "<span style = 'color:black'>",
+      "news articles by month</span>"))+
+  theme(axis.text.x = element_text(angle = 45,hjust = 1)) +
+  geom_vline(xintercept=12, linetype="dotdash") +
+  xlab("Year-Month") +
+  ggplot2::annotate("text", x=13.14, y=20, label = "month of U.S\nelection", size=3)
+
+
+```
+
+
+**************************
+
+**Main sources of fake and real news?**
+
+
+Top real news sources
+
+```{r}
+politifact %>%
+  filter(fake==0) %>%
+  count(source, sort=T) %>%
+  head(10)
+```
+
+
+Top fake news sources
+
+```{r}
+politifact %>%
+  filter(fake==1) %>%
+  count(source, sort=T) %>%
+  head(10)
+```
+
+
+
+
+
+**************************
+
+### Correlation tests
+
+What is the similarity between words in fake vs real news. Word correlation between those in fake vs real news.
+
+**Pearson Correlation of 87%**
+```{r}
+## count each word per character 
+oc = tidy_politifact_seq_stem[,c("fake","word")]
+d=  count_(oc, c("fake", "word"))
+
+# make a document term matrix 
+pwdtm = d %>%
+  cast_dtm(fake, word, n)
+
+# make the dtm into a dataframe 
+mpwdtm=as.matrix(pwdtm)
+df.mpwdtm=as.data.frame(mpwdtm)
+
+# make the dtm into a tdm instead #
+t.t = t(mpwdtm)
+
+cor(t.t)
+```
+
+******************
+
+Visualizing word correlations
+
+**Pairwise correlation**
+
+
+```{r}
+library(widyr)
+
+#Counting and correlating among sections
+politifact_section_words_fake <- politifact %>%
+  filter(fake==1) %>%
+  mutate(section = row_number()) %>%
+  filter(section > 0) %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word) %>%
+  mutate(word = str_extract(word, "[a-z']+"),
+         word = str_replace_all(word, pattern="'", ""),
+        word = wordStem(word))
+  
+
+###  Pairwise correlation
+word_cors_fake <- politifact_section_words_fake %>%
+  group_by(word) %>%
+  # filter for at least relatively common words first
+  filter(n() >= 20) %>%
+  pairwise_cor(word, section, sort = TRUE)
+
+suppressMessages(library(igraph))
+library(ggraph)
+set.seed(9)
+
+word_cors_fake %>%
+  filter(correlation > .40) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_classic() +
+  ggtitle("Pairwise correlation > .40 between words in fake news")
+```
+
+******************
+
+```{r}
+#Counting and correlating among sections
+politifact_section_words_real <- politifact %>%
+  filter(fake==0) %>%
+  mutate(section = row_number()) %>%
+  filter(section > 0) %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word) %>%
+  mutate(word = str_extract(word, "[a-z']+"),
+         word = str_replace_all(word, pattern="'", ""),
+        word = wordStem(word))
+  
+
+###  Pairwise correlation
+word_cors_real <- politifact_section_words_real %>%
+  group_by(word) %>%
+  # filter for at least relatively common words first
+  filter(n() >= 20) %>%
+  pairwise_cor(word, section, sort = TRUE)
+
+suppressMessages(library(igraph))
+library(ggraph)
+set.seed(9)
+
+word_cors_real %>%
+  filter(correlation > .6) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_classic() +
+  ggtitle("Pairwise correlation > .60 between words in real news")
+```
+
+******************
+
+**Bigram correlation (tf-idf)**
+
+
+```{r}
+politifact_bigrams <- politifact %>%
+  arrange(year,month) %>%
+  mutate(article_seq = row_number()) %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+#Filtering stop_words
+bigrams_separated <- politifact_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>%
+  mutate(word1 = str_extract(word1, "[a-z']+"),
+         word1 = str_replace_all(word1, pattern="'", ""),
+         word2 = str_extract(word2, "[a-z']+"),
+         word2 = str_replace_all(word2, pattern="'", ""),
+         ) %>%
+  filter(!is.na(word1), !is.na(word2))
+
+bigrams_filtered <- bigrams_filtered %>%
+  mutate(word1 = wordStem(word1),
+         word2 = wordStem(word2)) 
+
+#Reunite to find the most common bigrams not containing stop-words
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+#Look at tf-idf of bigrams by fake news 
+bigram_tf_idf <- bigrams_united %>%
+  count(fake, bigram) %>%
+  bind_tf_idf(bigram, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+bigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(bigram = factor(bigram, levels = rev(unique(bigram)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(bigram, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+These words are, as measured by tf-idf, the most important bigrams in each news type, meaning these are the top phrases thatmost distinguish fake news from real news articles. 
+
+******************
+
+**unigram correlation (tf-idf)**
+
+
+```{r}
+politifact_unigrams <- politifact %>%
+  unnest_tokens(unigram, text, token = "ngrams", n = 1)
+
+#Filtering stop_words
+unigrams_filtered <- politifact_unigrams %>%
+  filter(!unigram %in% stop_words$word) %>%
+  mutate(unigram = wordStem(unigram))
+
+
+#Look at tf-idf of unigrams by fake news 
+unigram_tf_idf <- unigrams_filtered %>%
+  count(fake, unigram) %>%
+  bind_tf_idf(unigram, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+unigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(unigram = factor(unigram, levels = rev(unique(unigram)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(unigram, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+This is the unigram version of the plot above. These particular words are the most important to each respective news type. 
+
+******************
+
+**trigram correlation (tf-idf)**
+
+```{r}
+politifact_trigram <- politifact %>%
+  arrange(year,month) %>%
+  mutate(article_seq = row_number()) %>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3)
+
+#Filtering stop_words
+trigram_separated <- politifact_trigram %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ")
+
+trigram_filtered <- trigram_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>%
+  filter(!word3 %in% stop_words$word) %>%
+  mutate(word1 = str_extract(word1, "[a-z']+"),
+         word1 = str_replace_all(word1, pattern="'", ""),
+         word2 = str_extract(word2, "[a-z']+"),
+         word2 = str_replace_all(word2, pattern="'", ""),
+         word3 = str_extract(word3, "[a-z]+"),
+         word3 = str_replace_all(word3, pattern="'", "")) %>%
+  filter(!is.na(word1), !is.na(word2), !is.na(word3))
+
+trigram_filtered <- trigram_filtered %>%
+  mutate(word1 = wordStem(word1),
+         word2 = wordStem(word2),
+         word3 = wordStem(word3)) 
+
+#Reunite to find the most common bigrams not containing stop-words
+trigram_united <- trigram_filtered %>%
+  unite(trigram, word1, word2, word3, sep = " ")
+
+#Look at tf-idf of bigrams by fake news 
+trigram_tf_idf <- trigram_united %>%
+  count(fake, trigram) %>%
+  bind_tf_idf(trigram, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+trigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(trigram = factor(trigram, levels = rev(unique(trigram)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(trigram, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+
+<!-- ### topic modeling -->
+
+```{r}
+# source("raw-data/FakeNewsNet-master/stm.R")
+```
+
+
+
+### Sentiment analysis
+
+Average 'afinn' sentiment score between real (0) and fake(1) news sources
+```{r}
+library(tidytext)
+afinn <- get_sentiments("afinn")
+
+
+# tidy_politifact_seq_stem %>%
+#   filter(!is.na(word)) %>%
+#   inner_join(afinn) %>%
+#   group_by(X1) %>%
+#   mutate(art_sent = mean(value)) %>%
+#   ungroup(X1) %>%
+#   group_by(fake) %>%
+#   summarise(t = mean(value))
+
+# bag of words - sum all sentiment values by group
+tidy_politifact_seq_stem %>%
+  filter(!is.na(word)) %>%
+  inner_join(afinn) %>%
+  group_by(fake) %>%
+  summarise(sum_sent = sum(value))
+
+# sum of afinn values by article, average by news type
+tidy_politifact_seq_stem %>%
+  filter(!is.na(word)) %>%
+  inner_join(afinn) %>%
+  group_by(X1) %>%
+  mutate(t = sum(value)) %>%
+  ungroup() %>% group_by(fake) %>%
+  summarise(sum_avg = mean(t)) 
+
+# bag of words - avg all sentiment values by group
+tidy_politifact_seq_stem %>%
+  filter(!is.na(word)) %>%
+  inner_join(afinn) %>%
+  group_by(fake) %>%
+  summarise(avg_sent = mean(value))
+
+# art_sent <- tidy_politifact_seq_stem %>%
+#   filter(!is.na(word)) %>%
+#   inner_join(afinn) %>%
+#   select(value, fake) 
+# 
+# x1 <- art_sent %>%
+#   filter(fake==0) %>%
+#   select(value)
+# 
+# x2 <- art_sent %>%
+#   filter(fake==1) %>%
+#   select(value)
+# 
+# t.test(x1, x2)
+```
+
+first table: sum all sentiment values by group
+
+second table: sum of afinn values by article, average by news type
+
+
+Not a strong consensus on how to compare aggreagte sentiment scores. In many applications people use averages because documents can vary in length. "If you have a very long document you might see more positive or negative words, but this can simply be a function of having more words overall. If your document lengths are similar, then summing might make more sense" (Prof. Mitts).
+
+
+This is a good example though on how the interpretation of sentiment analysis results varies with methodology.
+
+******************
+
+For the three plots below:
+
+- each line represents the sentiment of one article.
+- index (x-axis) -- sequence in which articles were released
+- the date is unavailable for articles after the dotted line 
+
+
+```{r}
+bing <- get_sentiments("bing")
+
+ind_fake <- tidy_politifact_seq_stem %>%
+  select(fake, article_seq) %>%
+  distinct() %>%
+  rename(index=article_seq) %>%
+  mutate(index = ifelse(index>=165,index+10,index))
+
+### AFINN average
+tidy_politifact_seq_stem %>%
+    # adds space in index
+  mutate(article_seq = ifelse(article_seq>=165,article_seq+10,article_seq)) %>%
+  filter(!is.na(word)) %>%
+    inner_join(get_sentiments("afinn")) %>% 
+  group_by(index = article_seq %/% 1) %>% 
+  # average sentiment by article
+  summarise(sentiment = mean(value)) %>% 
+  left_join(., ind_fake, by="index") %>%
+  mutate(method = "Average AFINN Score by Article") %>%
+  ggplot(aes(index, sentiment, fill=as.factor(fake))) +
+  geom_col(show.legend = T) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+   geom_vline(xintercept=170, linetype="dashed") +
+  theme_classic() + 
+  scale_fill_manual(values=c("#34344A","#9E5773"), name="", 
+                    labels=c("Real", "Fake")) +
+  theme(legend.position = c(1,0),
+       legend.justification = c(1,-.1),
+       legend.direction="horizontal",
+       legend.text = element_text(size=8))
+```
+
+
+Each line represents the average AFINN score by article.
+
+```{r}
+### AFINN average
+tidy_politifact_seq_stem %>%
+    # adds space in index
+  mutate(article_seq = ifelse(article_seq>=165,article_seq+10,article_seq)) %>%
+  filter(!is.na(word)) %>%
+    inner_join(get_sentiments("afinn")) %>% 
+  group_by(index = article_seq %/% 1) %>% 
+  # average sentiment by article
+  summarise(sentiment = sum(value)) %>% 
+  left_join(., ind_fake, by="index") %>%
+  mutate(method = "Summed AFINN Score by Article") %>%
+  ggplot(aes(index, sentiment, fill=as.factor(fake))) +
+  geom_col(show.legend = T) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+   geom_vline(xintercept=170, linetype="dashed") +
+  theme_classic() + 
+  scale_fill_manual(values=c("#34344A","#9E5773"), name="", 
+                    labels=c("Real", "Fake")) +
+  theme(legend.position = c(1,0),
+       legend.justification = c(1,-.1),
+       legend.direction="horizontal",
+       legend.text = element_text(size=8))
+```
+
+
+Each line represents the sum of AFINN scores by article.
+
+
+
+```{r}
+### BING
+tidy_politifact_seq_stem %>%
+  # adds space in index
+  mutate(article_seq = ifelse(article_seq>=165,article_seq+10,article_seq)) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("bing")) %>% 
+  count(fake, index = article_seq %/% 1, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative,
+         method = "Net BING Score by Article") %>%
+  ggplot(., aes(index, sentiment, fill = as.factor(fake))) +
+  geom_col(show.legend = T) +
+  facet_wrap(~method, ncol = 2, scales = "free_x") +
+  geom_vline(xintercept=170, linetype="dashed") +
+  theme_classic() +
+  scale_fill_manual(values=c("#34344A","#9E5773"), name="", labels=c("Real", "Fake")) +
+  theme(legend.position = c(1,0),
+       legend.justification = c(1,-.1),
+       legend.direction="horizontal",
+       legend.text = element_text(size=8))
+  
+# tidy_politifact_seq_stem %>%
+#   filter(!is.na(word)) %>%
+#     inner_join(get_sentiments("nrc") %>%
+#         filter(sentiment %in% c("negative", "positive"))) %>% 
+#   group_by(fake, sentiment) %>%
+#   count(word, sort = TRUE)
+```
+
+Each line represents the net BING score by article (positive words counts - negative word counts)
+
+
+
+******************
+
+#### 'Not' words
+
+words that contributed to the wrong sentiment direction 
+
+```{r}
+not_words <- bigrams_separated %>%
+  filter(word1 == "not") %>%
+  inner_join(get_sentiments("afinn"), by = c(word2 = "word")) %>%
+  group_by(fake) %>%
+  count(word2, value, sort = TRUE)
+
+not_words %>%
+  filter(fake==1) %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(15) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "Sentiment value * number of occurrences",
+       y = "Words preceded by \"not\"") +
+  ggtitle("Fake news") +
+  theme_classic()
+
+not_words %>%
+  filter(fake==0) %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(15) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "Sentiment value * number of occurrences",
+       y = "Words preceded by \"not\"")  +
+  ggtitle("Real news") +
+  theme_classic()
+```
+
+
+```{r}
+negation_words <- c("not", "no", "never", "without")
+
+negated_words <- bigrams_separated %>%
+  filter(word1 %in% negation_words) %>%
+  inner_join(get_sentiments("afinn"), by = c(word2 = "word")) %>%
+  group_by(fake) %>%
+  count(word1, word2, value, sort = TRUE)
+
+
+negated_words %>%
+  filter(fake==0, word1=="no") %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(15) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "Sentiment value * number of occurrences",
+       y = "Words preceded by \"no\"") +
+  ggtitle("Real news") +
+  theme_classic()
+
+negated_words %>%
+  filter(fake==1, word1=="no") %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(15) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "Sentiment value * number of occurrences",
+       y = "Words preceded by \"no\"") +
+  ggtitle("Fake news") +
+  theme_classic()
+```
+
+******************
+
+#### On average, what proportion of words in an article hold particular sentiment?
+
+```{r}
+df_stats = read_csv("./output-data/output.csv")
+# r indexing
+df_stats$article_seq <- df_stats$X1 + 1
+
+df_stats <- df_stats %>%
+  select(article_seq, sent_length, num_word_unique, num_dict_word_unique, total_dict_words,
+         total_words, date)
+```
+
+
+
+#### Disgust
+
+```{r}
+disgust_table <- tidy_politifact_seq %>%
+  left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="disgust")) %>% 
+  group_by(article_seq,fake) %>%
+  mutate(n = n()) %>%
+  ungroup() %>% select(fake,article_seq,n,total_words) %>%
+  distinct() %>%
+  group_by(fake) %>%
+  mutate(mean_word_sent_disgust = mean(n),
+         mean_sent_prop_disgust = round(mean(n / total_words, na.rm = T),4)) %>%
+  select(fake, mean_word_sent_disgust, mean_sent_prop_disgust) %>% distinct()
+
+disgust_table
+```
+
+
+- mean_word_sent -- average number of 'disgust' words per article by news type 
+- mean_sent_prop -- average total proportion of words in an article that hold 'digest' sentiment
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="disgust")) %>%
+  filter(fake==1) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#9E5773") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'disgust' words in *Politifact* **fake** news articles</span>")
+```
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="disgust")) %>%
+  filter(fake==0) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#34344A") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'disgust' words in *Politifact* **real** news articles</span>")
+```
+
+******************
+
+**unigram correlation (tf-idf)**
+
+
+```{r}
+politifact_unigrams <- politifact %>%
+  unnest_tokens(word, text, token = "ngrams", n = 1) 
+
+#Filtering stop_words
+unigrams_filtered <- politifact_unigrams %>%
+  filter(!word %in% stop_words$word) %>%
+  mutate(word = str_replace_all(word, "'", "")) %>%
+  # remove 'gore' --> refers to Al Gore
+  filter(word!="gore") %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="disgust"))
+
+#Look at tf-idf of unigrams by fake news 
+unigram_tf_idf <- unigrams_filtered %>%
+  count(fake, word) %>%
+  bind_tf_idf(word, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+unigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(word, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+These words are the most important 'disgust' unigrams to each respective news type. 
+
+
+******************
+
+#### Fear
+
+
+```{r}
+fear_table <- tidy_politifact_seq %>%
+  left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="fear")) %>% 
+  # count number of 'fear' words by artcile
+  group_by(article_seq) %>%
+  mutate(n = n()) %>%
+  ungroup() %>% 
+  # grab at the article, not word, level
+  select(fake,article_seq,n,total_words) %>% distinct(article_seq,.keep_all=T) %>%
+  mutate(prop_fear = n/total_words) %>%
+  group_by(fake) %>%
+  mutate(mean_word_sent_fear = mean(n),
+         avg_prop_fear = mean(prop_fear, na.rm=T)) %>%
+  select(fake, mean_word_sent_fear,avg_prop_fear) %>% distinct()
+
+fear_table
+```
+
+mean_word_sent -- average number of 'fear' words in an article
+avg_prop_fear -- average proportion of 'fear' words in an article
+
+
+
+
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="fear")) %>%
+  filter(fake==1) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#9E5773") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'fear' words in *Politifact* **fake** news articles</span>")
+```
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="fear")) %>%
+  filter(fake==0) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#34344A") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'fear' words in *Politifact* **real** news articles</span>")
+```
+
+**********************************
+
+
+**unigram correlation (tf-idf)**
+
+
+```{r}
+politifact_unigrams <- politifact %>%
+  unnest_tokens(word, text, token = "ngrams", n = 1)
+
+#Filtering stop_words
+unigrams_filtered <- politifact_unigrams %>%
+  filter(!word %in% stop_words$word) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="fear"))
+
+#Look at tf-idf of unigrams by fake news 
+unigram_tf_idf <- unigrams_filtered %>%
+  count(fake, word) %>%
+  bind_tf_idf(word, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+unigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(word, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+These words are the most important 'fear' unigrams to each respective news type. 
+
+****************************************************************
+
+#### Joy
+
+```{r}
+joy_table <- tidy_politifact_seq %>%
+  left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="joy")) %>% 
+  group_by(article_seq,fake) %>%
+  mutate(n = n()) %>%
+  ungroup() %>% select(fake,article_seq,n,total_words) %>%
+  distinct() %>%
+  group_by(fake) %>%
+  mutate(mean_word_sent_joy = mean(n),
+         mean_sent_prop_joy = round(mean(n / total_words, na.rm = T),4)) %>%
+  select(fake, mean_word_sent_joy, mean_sent_prop_joy) %>% distinct()
+
+joy_table
+```
+
+- mean_word_sent -- average number of 'joy' words per article by news type 
+- mean_sent_prop -- average total proportion of words in an article that hold 'digest' sentiment
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="joy")) %>%
+  filter(fake==1) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#9E5773") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'joy' words in *Politifact* **fake** news articles</span>")
+```
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="joy")) %>%
+  filter(fake==0) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#34344A") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'joy' words in *Politifact* **real** news articles</span>")
+```
+
+******************
+
+**unigram correlation (tf-idf)**
+
+
+```{r}
+politifact_unigrams <- politifact %>%
+  unnest_tokens(word, text, token = "ngrams", n = 1)
+
+#Filtering stop_words
+unigrams_filtered <- politifact_unigrams %>%
+  filter(!word %in% stop_words$word) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="joy"))
+
+#Look at tf-idf of unigrams by fake news 
+unigram_tf_idf <- unigrams_filtered %>%
+  count(fake, word) %>%
+  bind_tf_idf(word, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+unigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(word, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+These words are the most important 'joy' unigrams to each respective news type. 
+
+***************************************************
+
+#### Negative
+
+```{r}
+negative_table <- tidy_politifact_seq %>%
+  left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="negative")) %>% 
+  group_by(article_seq,fake) %>%
+  mutate(n = n()) %>%
+  ungroup() %>% select(fake,article_seq,n,total_words) %>%
+  distinct() %>%
+  group_by(fake) %>%
+  mutate(mean_word_sent_negative = mean(n),
+         mean_sent_prop_negative = round(mean(n / total_words, na.rm = T),4)) %>%
+  select(fake, mean_word_sent_negative, mean_sent_prop_negative) %>% distinct()
+
+negative_table
+```
+
+- mean_word_sent -- average number of 'joy' words per article by news type 
+- mean_sent_prop -- average total proportion of words in an article that hold 'digest' sentiment
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="negative")) %>%
+  filter(fake==1) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#9E5773") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'negative' words in *Politifact* **fake** news articles</span>")
+```
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="negative")) %>%
+  filter(fake==0) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#34344A") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'negative' words in *Politifact* **real** news articles</span>")
+```
+
+******************
+
+**unigram correlation (tf-idf)**
+
+
+```{r}
+politifact_unigrams <- politifact %>%
+  unnest_tokens(word, text, token = "ngrams", n = 1)
+
+#Filtering stop_words
+unigrams_filtered <- politifact_unigrams %>%
+  filter(!word %in% stop_words$word) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="negative"))
+
+#Look at tf-idf of unigrams by fake news 
+unigram_tf_idf <- unigrams_filtered %>%
+  count(fake, word) %>%
+  bind_tf_idf(word, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+unigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(word, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+These words are the most important 'negative' unigrams to each respective news type. 
+
+
+************************************************************
+
+#### Anger
+
+```{r}
+anger_table <- tidy_politifact_seq %>%
+  left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="anger")) %>% 
+  group_by(article_seq,fake) %>%
+  mutate(n = n()) %>%
+  ungroup() %>% select(fake,article_seq,n,total_words) %>%
+  distinct() %>%
+  group_by(fake) %>%
+  mutate(mean_word_sent_anger = mean(n),
+         mean_sent_prop_anger = round(mean(n / total_words, na.rm = T),4)) %>%
+  select(fake, mean_word_sent_anger, mean_sent_prop_anger) %>% distinct()
+
+anger_table
+```
+
+- mean_word_sent -- average number of 'joy' words per article by news type 
+- mean_sent_prop -- average total proportion of words in an article that hold 'digest' sentiment
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="anger")) %>%
+  filter(fake==1) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#9E5773") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'anger' words in *Politifact* **fake** news articles</span>")
+```
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="anger")) %>%
+  filter(fake==0) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#34344A") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'anger' words in *Politifact* **real** news articles</span>")
+```
+
+******************
+
+**unigram correlation (tf-idf)**
+
+
+```{r}
+politifact_unigrams <- politifact %>%
+  unnest_tokens(word, text, token = "ngrams", n = 1)
+
+#Filtering stop_words
+unigrams_filtered <- politifact_unigrams %>%
+  filter(!word %in% stop_words$word) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="anger"))
+
+#Look at tf-idf of unigrams by fake news 
+unigram_tf_idf <- unigrams_filtered %>%
+  count(fake, word) %>%
+  bind_tf_idf(word, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+unigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(word, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+These words are the most important 'disgust' unigrams to each respective news type. 
+
+
+************************************************************
+
+#### Sadness
+
+```{r}
+sadness_table <- tidy_politifact_seq %>%
+  left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="sadness")) %>% 
+  group_by(article_seq,fake) %>%
+  mutate(n = n()) %>%
+  ungroup() %>% select(fake,article_seq,n,total_words) %>%
+  distinct() %>%
+  group_by(fake) %>%
+  mutate(mean_word_sent_sadness = mean(n),
+         mean_sent_prop_sadness = round(mean(n / total_words, na.rm = T),4)) %>%
+  select(fake, mean_word_sent_sadness, mean_sent_prop_sadness) %>% distinct()
+
+sadness_table
+```
+
+- mean_word_sent -- average number of 'joy' words per article by news type 
+- mean_sent_prop -- average total proportion of words in an article that hold 'digest' sentiment
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="sadness")) %>%
+  filter(fake==1) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#9E5773") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'sadness' words in *Politifact* **fake** news articles</span>")
+```
+
+```{r}
+tidy_politifact_seq %>%
+  # left_join(., df_stats, by=c("article_seq", "date")) %>%
+  filter(!is.na(word)) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="sadness")) %>%
+  filter(fake==0) %>%
+  count(word) %>%
+  arrange(desc(n)) %>%  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#34344A") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top 'sadness' words in *Politifact* **real** news articles</span>")
+```
+
+******************
+
+**unigram correlation (tf-idf)**
+
+
+```{r}
+politifact_unigrams <- politifact %>%
+  unnest_tokens(word, text, token = "ngrams", n = 1)
+
+#Filtering stop_words
+unigrams_filtered <- politifact_unigrams %>%
+  filter(!word %in% stop_words$word) %>%
+  inner_join(get_sentiments("nrc") %>%
+      filter(sentiment=="sadness"))
+
+#Look at tf-idf of unigrams by fake news 
+unigram_tf_idf <- unigrams_filtered %>%
+  count(fake, word) %>%
+  bind_tf_idf(word, fake, n) %>%
+  arrange(desc(tf_idf))
+
+
+unigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(fake) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(word, tf_idf, fill = as.factor(fake))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#34344A","#9E5773"))
+```
+
+These words are the most important 'disgust' unigrams to each respective news type. 
+
+
+********************************************
+
+**Summarizing table of NRC sentiments**
+
+Table includes:
+
+- average number of X sentiment words per article by news type 
+- average total proportion of words in an article that hold X sentiment
+
+- NRC sentiments here: fear, sadness, disgust, anger, negative, joy
+
+
+```{r}
+library(plyr)
+summary_emot <- join_all(list(fear_table,sadness_table,disgust_table,anger_table,negative_table, joy_table), by='fake', type='left')
+
+summary_emot <- summary_emot %>% 
+ mutate_if(is.numeric, round, digits=3)
+
+library(DT)
+datatable(summary_emot, options = list(pageLength = 2))
+```
+
