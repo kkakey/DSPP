@@ -30,3 +30,18 @@ Project files:
 * politifact.ipynb
   * script that provides summary statistics on real and fake news
   * i.e average article length, average number of sentences, unique words, etc.
+  
+  
+  
+  
+*******************************************************
+
+
+### Analyzing Chicago Crime and 311 Lights Out Data, 2018
+
+* project2.Rmd
+  * descriptive crime reported statistics, spatial analysis of reported crime / arrests and demographics, 311 lights out analysis and its relationship with reported crime rates
+
+
+* project2.html
+  * knitted output file from project2.Rmd 
