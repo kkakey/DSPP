@@ -1,0 +1,619 @@
+---
+title: "Project 2"
+author: "Kristen Akey, kka2120"
+date: "2/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(viridis)
+library(sf)
+```
+
+
+```{r}
+chi <- read_csv("raw-data/crime_data/Chicago/chicago_crimes_2018.csv")
+```
+
+
+```{r}
+## create date/time variables
+
+# date ony variable
+chi$Date_simp <- substr(chi$Date, 1, 10)
+a<-as.factor(chi$Date_simp)
+abis<-strptime(a,format="%m/%d/%Y", tz="UTC") #defining what is the original format of your date
+chi$Date_simp<-as.Date(abis,format="%Y-%m-%d")
+
+# time variable
+chi$time <- format(strptime(trimws(substr(chi$Date, 11, 22), which="both"), "%I:%M:%S %p"), "%H:%M:%S")
+```
+
+
+```{r}
+# 'night' crimes
+```
+
+
+
+
+# summary descriptive statistics
+
+```{r}
+# top overall crimes
+top_crimes <- chi %>%
+  select(Date, `Primary Type`) %>%
+  count(`Primary Type`) %>%
+  arrange(desc(n)) 
+top_crimes
+```
+
+```{r}
+# top "night" crimes
+top_night_crimes <- chi %>%
+  select(Date_simp, time, `Primary Type`) %>%
+  filter(time >="22:00:00" | time <= "06:00:00") %>%
+  count(`Primary Type`) %>%
+  arrange(desc(n)) 
+top_night_crimes
+```
+
+
+
+
+```{r}
+top_five<- top_crimes %>%
+  head(5) %>% pull(`Primary Type`)
+
+chi %>%
+  select(Date_simp, `Primary Type`) %>%
+  filter(`Primary Type` %in% c(top_five, "NARCOTICS")) %>%
+  arrange(Date_simp) %>%
+  group_by(Date_simp) %>%
+  count(`Primary Type`) %>%
+  ggplot(., aes(Date_simp, n, color=`Primary Type`)) +
+  geom_line()
+```
+
+******************************************************************
+
+### Theft Crime counts overtime, 2018
+
+```{r}
+# date variables for geom_tile plot
+chi$month <- month(as.POSIXlt(chi$Date_simp, format="%Y/%m/%d"))
+chi$year <- year(as.POSIXlt(chi$Date_simp, format="%Y/%m/%d"))
+chi <- chi %>%
+  mutate(month_year = paste0(as.character(month),"-",as.character(year)))
+chi$weekday <- wday(
+  chi$Date_simp,
+  label = T,
+  abbr = TRUE,
+  week_start = getOption("lubridate.week.start", 1)
+)
+chi$weeknum <- week(chi$Date_simp)
+chi$daynum <-day(chi$Date_simp)
+```
+
+```{r}
+chi %>%
+  # select(Date_simp, `Primary Type`) %>%
+  filter(`Primary Type`=="THEFT") %>%
+  arrange(Date_simp) %>%
+  group_by(Date_simp) %>%
+  mutate(n = n()) %>%
+  ggplot(., aes(x = weeknum, y = weekday, fill = n)) +
+  geom_tile(col = "black", width = .95, height = .9) +
+  # facet_wrap(vars(year), strip.position = "top", nrow = 3) +
+  scale_fill_viridis(option="inferno", #end = .9, labels = function(x) paste0(x, "%"),
+                     name="", direction = -1) +
+  scale_x_continuous(expand = c(0, 0),
+                    breaks = seq(1, 52, length = 12),
+                    labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))  +
+  xlab("") + ylab("") +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        text = element_text(family="Lato"),
+        legend.justification = c(.95, 0),
+        legend.position = "bottom",
+        legend.margin = margin(-0.25,-0.5,0,-0.5, unit="cm"),
+        plot.margin =  margin(.5,.5,.5,.5, unit="cm"),
+        legend.key.width = unit(.8, "cm"),
+        plot.title = element_text(vjust=2.4, size=14),
+        plot.subtitle = element_text(size=9, vjust=1),
+        plot.caption = element_text(size=7, vjust=-15)
+        ) +
+  ggtitle("Chicago Theft Crime Counts, 2018")
+```
+
+
+-- time of day? 
+-- does the day of week change?
+-- weather beginning of 2018? correlation between weather and crime
+-- holidays?
+-- Spatially?
+
+********************************************************************************
+
+
+```{r}
+beats_shp <- read_sf('raw-data/crime_data/Chicago/Boundaries-Police_Beats_current/geo_export_fb1cc8b1-500e-49cd-a492-47f82d2121a5.shp')
+```
+
+
+```{r}
+chi <- chi %>% rename(beat_num = Beat )
+
+tot_arrest_data <- chi %>%
+  group_by(beat_num) %>%
+  mutate(tot_arrest = sum(Arrest)) %>%
+  select(beat_num, tot_arrest) %>%
+  distinct()
+
+tot_arrest_shp <- left_join(beats_shp, tot_arrest_data, by="beat_num") #
+
+tot_arrest_shp$tot_arrest_cat <- cut(tot_arrest_shp$tot_arrest, 
+                                     breaks = c(0, 250,500,750,1000,1250), 
+                              labels = c("250","500","750","1000","1250"))
+
+tot_arrest_shp %>%
+  filter(!is.na(tot_arrest_cat)) %>%
+ggplot(.) + 
+  geom_sf( aes(fill=tot_arrest_cat),size=.3) +
+  theme_void() +
+  scale_fill_brewer(palette = "RdPu", na.value = "grey80",
+                  name="Total Arrests") +
+  ggtitle("Chicago Arrests by Police Beat, 2018") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif")) 
+
+sum(tot_arrest_shp$tot_arrest, na.rm=T)
+```
+
+
+```{r}
+# all reported crimes by police beat
+
+tot_crime_data <- chi %>%
+  group_by(beat_num) %>%
+  mutate(tot_crime = n()) %>%
+  select(beat_num, tot_crime) %>%
+  distinct()
+
+tot_crime_shp <- left_join(beats_shp, tot_crime_data, by="beat_num") #
+
+tot_crime_shp$tot_crime_cat <- cut(tot_crime_shp$tot_crime, 
+                                     breaks = c(0, 500,1000,1500,2000,2500,3000,3500), 
+                          labels = c("500","1000", "1500","2000","2500", "3000", "3500"))
+
+tot_crime_shp %>%
+  filter(!is.na(tot_crime_cat)) %>%
+ggplot(.) + 
+  geom_sf( aes(fill=tot_crime_cat),size=.3) +
+  theme_void() +
+  scale_fill_brewer(palette = "YlGnBu", na.value = "grey80",
+                  name="Total Crimes") +
+  ggtitle("Chicago Crimes Reported by Police Beat, 2018") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif")) 
+```
+
+********************************************************************************
+
+Spatially?
+Lights?
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+# https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Street-Lights-All-Out-Histori/zuxi-7xem/data
+allout <- read_csv("raw-data/311_Service_Requests_-_Street_Lights_-_All_Out_-_Historical.csv")
+
+allout$creation_date <-as.Date(allout$`Creation Date`,format="%m/%d/%Y")
+allout$completion_date <-as.Date(allout$`Completion Date`,format="%m/%d/%Y")
+
+allout$creation_date_year <- format(allout$creation_date, format = "%Y")
+allout <- allout %>% filter(creation_date_year==2018)
+
+
+# https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Street-Lights-One-Out-Histori/3aav-uy2v/data
+oneout <- read_csv("raw-data/311_Service_Requests_-_Street_Lights_-_One_Out_-_Historical.csv")
+
+oneout$creation_date <-as.Date(oneout$`Creation Date`,format="%m/%d/%Y")
+oneout$completion_date <-as.Date(oneout$`Completion Date`,format="%m/%d/%Y")
+oneout$creation_date_year <- format(oneout$creation_date, format = "%Y")
+oneout <- oneout %>% filter(creation_date_year==2018)
+```
+
+```{r}
+lights_out <- allout %>% rbind(.,oneout)
+```
+
+
+What areas had more duplicated requests?
+```{r}
+
+```
+
+
+
+```{r}
+lights_out <- lights_out %>%
+  filter(Status=="Completed") %>%
+  mutate(time_to_complete_all = completion_date- creation_date) %>%
+  group_by(`Type of Service Request`) %>%
+  mutate(time_to_complete_status = completion_date- creation_date)
+
+ggplot(lights_out, aes(time_to_complete_all)) + 
+  geom_histogram() +
+  ggtitle('Distribution of Time to Complete in Days')
+```
+
+```{r}
+quantile(as.numeric(lights_out$time_to_complete_all))
+mean(as.numeric(lights_out$time_to_complete_all))
+```
+
+
+```{r}
+ggplot(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",],
+       aes(time_to_complete_status)) + 
+  geom_histogram() +
+  ggtitle('Distribution of Time to Complete in Days - All/Out')
+```
+
+
+```{r}
+ggplot(lights_out[lights_out$`Type of Service Request`=="Street Light Out",],
+       aes(time_to_complete_status)) + 
+  geom_histogram() +
+  ggtitle('Distribution of Time to Complete in Days - Street Light Out')
+```
+
+```{r}
+quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
+mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
+
+
+quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
+mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
+```
+
+
+**********************************************************************
+
+Remove outliers
+```{r}
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(as.numeric(lights_out$time_to_complete_all), .25)
+Q3 <- quantile(as.numeric(lights_out$time_to_complete_all), .75)
+IQR <- IQR(as.numeric(lights_out$time_to_complete_all))
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+no_outliers <- subset(lights_out, as.numeric(lights_out$time_to_complete_all)> (Q1 - 1.5*IQR) & as.numeric(lights_out$time_to_complete_all)< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+ggplot(data=no_outliers, aes(as.numeric(time_to_complete_all))) +
+  geom_histogram() +
+  ggtitle("Distribution of Time to Complete in Days - Outliers Removed")
+```
+
+```{r}
+mean(as.numeric(no_outliers$time_to_complete_all))
+```
+
+
+********************************************
+
+```{r}
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status), .25)
+Q3 <- quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status), .75)
+IQR <- IQR(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
+
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+no_outliers <- subset(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",], as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status)> (Q1 - 1.5*IQR) & as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status)< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+ggplot(data=no_outliers, aes(as.numeric(time_to_complete_status))) +
+  geom_histogram()
+```
+
+```{r}
+mean(as.numeric(no_outliers$time_to_complete_all))
+```
+
+********************************************
+
+```{r}
+#find Q1, Q3, and interquartile range for values in column A
+Q1 <- quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status), .25)
+Q3 <- quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status), .75)
+IQR <- IQR(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
+
+
+#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+no_outliers <- subset(lights_out[lights_out$`Type of Service Request`=="Street Light Out",], as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status)> (Q1 - 1.5*IQR) & as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status)< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+ggplot(data=no_outliers, aes(as.numeric(time_to_complete_status)))  +
+  geom_histogram()
+```
+
+```{r}
+mean(as.numeric(no_outliers$time_to_complete_all))
+```
+
+**************************************************
+
+```{r}
+# remove na lat/long
+lights_out <- lights_out %>%
+  filter(!is.na(Latitude))
+# convert dataframe to spaital data
+lights_out_sf <- st_as_sf(lights_out, coords = c("Longitude", "Latitude"), crs = st_crs(beats_shp))
+
+beats_lights_shp <- beats_shp %>%
+  st_join(lights_out_sf) 
+
+### complete by community area
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+************************************************************************
+
+### BY BEAT NUMBER
+
+#### Occurances
+
+```{r}
+beats_lights_shp %>%
+  filter(`Type of Service Request`=="Street Lights - All/Out") %>%
+  group_by(beat_num) %>%
+  mutate(num_out =n(),
+         num_out_cat = cut(num_out,
+                 breaks = c(0, 50,100,150,200), 
+                              labels = c("50","100","150","200")) 
+         ) %>%
+  ggplot() +
+    geom_sf(aes(fill=as.factor(num_out_cat))) +
+    theme_void() +
+    scale_fill_brewer(
+                  na.value = "grey80",
+                  name="Number of All\nLights Out Complaints") +
+  ggtitle("Number of 311 All Lights Out Complaints by Police Beat, 2018") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif")) 
+```
+
+
+```{r}
+beats_lights_shp %>%
+  filter(`Type of Service Request`=="Street Light Out") %>%
+  group_by(beat_num) %>%
+  mutate(num_out =n(),
+         # num_out_cat = cut(num_out,
+         #         breaks = c(0, 50,100,150,200, 250, 300), 
+         #                      labels = c("50","100","150","200", "250", "300")) 
+          num_out_cat = cut(num_out,
+                 breaks = c(0,100,200,  300), 
+                              labels = c("100","200", "300")) 
+         ) %>%
+  ggplot() +
+    geom_sf(aes(fill=as.factor(num_out_cat))) +
+    theme_void() +
+    scale_fill_brewer(
+                  na.value = "grey80",
+                  name="Number of Light Out Complaints") +
+  ggtitle("Number of 311 Light Out Complaints by Police Beat, 2018") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif")) 
+```
+
+
+#### Time to Complete
+
+
+```{r}
+beats_lights_shp %>%
+  filter(`Type of Service Request`=="Street Lights - All/Out") %>%
+  group_by(beat_num) %>%
+  mutate(num_out =as.numeric(median(time_to_complete_status)),
+         num_out_cat = cut(num_out,
+                 breaks = c(0, 1,2,4,194),
+                              labels = c("25%","50%","75%","100% "))
+         ) %>%
+  ggplot() +
+    geom_sf(aes(fill=as.factor(num_out_cat))) +
+    theme_void() +
+    scale_fill_brewer(
+                  na.value = "grey80",
+                  name="Number of All\nLights Out Complaints") +
+  ggtitle("Number of 311 All Lights Out Complaints by Police Beat, 2018") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif")) 
+```
+
+
+```{r}
+quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
+mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
+```
+
+
+
+```{r}
+quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
+mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
+```
+
+
+
+
+
+****************************************************************
+
+### What is the relationship betwwen light outages and crime?
+
+```{r}
+# join light outage data with crime data
+crime_lights <- chi %>%
+  group_by(Date_simp) %>%
+  mutate(crime_n_by_date = n()) %>%
+  select(Date_simp, crime_n_by_date) %>%
+  rename("creation_date"="Date_simp") %>%
+  distinct(creation_date, .keep_all=T)
+  right_join(., lights_out, by = c("Date_simp" = "creation_date"))
+
+lights_out
+```
+
+
+
+******************************************************************
+
+### Where are the outliers occuring?
+
+Areas with the slowest median responses
+```{r}
+outlier_beats <- unique(beats_lights_shp %>%
+  filter(`Type of Service Request`=="Street Lights - All/Out") %>%
+  group_by(beat_num) %>%
+  mutate(num_out =as.numeric(median(time_to_complete_status))) %>%
+  filter(num_out>4) %>%
+  pull(beat_num))
+
+beats_lights_shp %>%
+  mutate(indic = ifelse(beat_num %in%outlier_beats,1,0)) %>%
+ggplot() +
+    geom_sf(aes(fill=as.factor(indic))) +
+    theme_void() 
+```
+
+
+Areas with the fastest median responses
+```{r}
+bestoutlier_beats <- unique(beats_lights_shp %>%
+  filter(`Type of Service Request`=="Street Lights - All/Out") %>%
+  group_by(beat_num) %>%
+  mutate(num_out =as.numeric(median(time_to_complete_status))) %>%
+  filter(num_out<=1) %>%
+  pull(beat_num))
+
+beats_lights_shp %>%
+  mutate(indic = ifelse(beat_num %in%bestoutlier_beats,1,0)) %>%
+ggplot() +
+    geom_sf(aes(fill=as.factor(indic))) +
+    theme_void() 
+```
+
+
+Is this the same for one light out compalints?
+
+Areas with the slowest median responses
+```{r}
+outlier_beats <- unique(beats_lights_shp %>%
+  filter(`Type of Service Request`=="Street Light Out") %>%
+  group_by(beat_num) %>%
+  mutate(num_out =as.numeric(median(time_to_complete_status))) %>%
+  filter(num_out>12) %>%
+  pull(beat_num))
+
+beats_lights_shp %>%
+  mutate(indic = ifelse(beat_num %in%outlier_beats,1,0)) %>%
+ggplot() +
+    geom_sf(aes(fill=as.factor(indic))) +
+    theme_void() 
+```
+
+
+
+************************************************************************
+
+Median number of days with all data
+```{r}
+beats_lights_shp %>%
+  filter(`Type of Service Request`=="Street Lights - All/Out") %>%
+  group_by(beat_num) %>%
+  mutate(time_to_complete =median(as.numeric(time_to_complete_all))) %>%
+  ggplot() +
+    geom_sf(aes(fill=as.factor(time_to_complete)))
+```
+
+
+```{r}
+beats_lights_shp %>%
+  filter(`Type of Service Request`=="Street Light Out") %>%
+  group_by(beat_num) %>%
+  mutate(time_to_complete =median(as.numeric(time_to_complete_all))) %>%
+  ggplot() +
+    geom_sf(aes(fill=as.factor(time_to_complete)))
+```
+
+
+
+
+******************************************************************************
+```{r}
+beats_shp %>% 
+  group_by(`Community Area`) %>% 
+  st_cast() 
+
+chi
+```
+
+
+
+
+
+
+
+******************************************************************************
+
+```{r}
+police_districts <- beats_shp %>% 
+  group_by(district) %>% 
+  st_cast() 
+
+```
+
+
+```{r}
+police_districts %>%
+  left_join(., no_outliers, by)
+```
+
