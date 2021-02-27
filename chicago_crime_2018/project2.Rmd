@@ -1,12 +1,15 @@
 ---
-title: "Project 2"
-author: "Kristen Akey, kka2120"
+title: "Predicting Crime and Recidivism: Crime in Chicago, 2018"
+author: "Kristen A, kkakey"
 date: "2/12/2021"
-output: html_document
+output: 
+  html_document:
+    toc: true
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = T, error = F, message = F)
 ```
 
 ```{r}
@@ -14,6 +17,7 @@ library(tidyverse)
 library(lubridate)
 library(viridis)
 library(sf)
+library(scales)
 ```
 
 
@@ -35,16 +39,9 @@ chi$Date_simp<-as.Date(abis,format="%Y-%m-%d")
 chi$time <- format(strptime(trimws(substr(chi$Date, 11, 22), which="both"), "%I:%M:%S %p"), "%H:%M:%S")
 ```
 
+## Chicago Crime 2018 Descriptive Statistics
 
-```{r}
-# 'night' crimes
-```
-
-
-
-
-# summary descriptive statistics
-
+Top overall crimes
 ```{r}
 # top overall crimes
 top_crimes <- chi %>%
@@ -54,6 +51,13 @@ top_crimes <- chi %>%
 top_crimes
 ```
 
+Top crimes reported in 2018 included theft, battery, and criminal damage. 
+
+
+***************************************************
+
+
+Top "night" crimes
 ```{r}
 # top "night" crimes
 top_night_crimes <- chi %>%
@@ -64,28 +68,30 @@ top_night_crimes <- chi %>%
 top_night_crimes
 ```
 
+Top crimes reported between 10pm and 6am in 2018 included similarly battery, theft, and criminal damage. 
 
 
 
 ```{r}
+## plot primary crime types of time
 top_five<- top_crimes %>%
   head(5) %>% pull(`Primary Type`)
 
-chi %>%
-  select(Date_simp, `Primary Type`) %>%
-  filter(`Primary Type` %in% c(top_five, "NARCOTICS")) %>%
-  arrange(Date_simp) %>%
-  group_by(Date_simp) %>%
-  count(`Primary Type`) %>%
-  ggplot(., aes(Date_simp, n, color=`Primary Type`)) +
-  geom_line()
+# chi %>%
+#   select(Date_simp, `Primary Type`) %>%
+#   filter(`Primary Type` %in% c(top_five, "NARCOTICS")) %>%
+#   arrange(Date_simp) %>%
+#   group_by(Date_simp) %>%
+#   count(`Primary Type`) %>%
+#   ggplot(., aes(Date_simp, n, color=`Primary Type`)) +
+#   geom_line() + theme_classic()
 ```
 
 ******************************************************************
 
-### Theft Crime counts overtime, 2018
 
 ```{r}
+#### theft crime counts overtime, 2018
 # date variables for geom_tile plot
 chi$month <- month(as.POSIXlt(chi$Date_simp, format="%Y/%m/%d"))
 chi$year <- year(as.POSIXlt(chi$Date_simp, format="%Y/%m/%d"))
@@ -134,34 +140,47 @@ chi %>%
 ```
 
 
--- time of day? 
--- does the day of week change?
--- weather beginning of 2018? correlation between weather and crime
--- holidays?
--- Spatially?
+Crime in Chicago increased greatly in the summer months. Interestingly, there is not a strong distinction in crimes reported by the day of the week.
+
 
 ********************************************************************************
 
 
 ```{r}
-beats_shp <- read_sf('raw-data/crime_data/Chicago/Boundaries-Police_Beats_current/geo_export_fb1cc8b1-500e-49cd-a492-47f82d2121a5.shp')
+# load community area shapefile
+commun_area <- read_sf("raw-data/Boundaries-Community-Areas_current/geo_export_14339f9c-fd8b-4301-8af0-035b3fbf2c00.shp")
+## https://datahub.cmap.illinois.gov/dataset/community-data-snapshots-raw-data/resource/96bc2e7d-9276-4d66-8cbf-63a0ed09a2a2
+
+comm_are_nums <- read_csv("raw-data/community_areas_w_numbers.csv", col_names=F) %>%
+  select(X1, X2) %>%
+  rename(GEOG = X2, area_num_1 = X1) %>%
+  mutate(area_num_1 = as.character(area_num_1))
+comm_are_nums[comm_are_nums$GEOG=="Lakeview",]$GEOG <- "Lake View"
+comm_are_nums[comm_are_nums$GEOG=="Loop",]$GEOG <- "The Loop"
+
+commun_demo <- read_csv("raw-data/CDS_archive_201906/Reference_CCAProfiles_2013_2017.csv") %>%
+  select(GEOG, TOT_POP, WHITE, HISP, BLACK, ASIAN, OTHER, MEDINC)
+
+commun_demo <- commun_demo %>%
+  left_join(., comm_are_nums, by="GEOG") 
 ```
 
 
 ```{r}
-chi <- chi %>% rename(beat_num = Beat )
+chi <- chi %>% rename(area_num_1=`Community Area`) %>%
+  mutate(area_num_1 = as.character(area_num_1))
 
 tot_arrest_data <- chi %>%
-  group_by(beat_num) %>%
+  group_by(area_num_1) %>%
   mutate(tot_arrest = sum(Arrest)) %>%
-  select(beat_num, tot_arrest) %>%
+  select(area_num_1, tot_arrest) %>%
   distinct()
 
-tot_arrest_shp <- left_join(beats_shp, tot_arrest_data, by="beat_num") #
+tot_arrest_shp <- left_join(commun_area, tot_arrest_data, by="area_num_1") #
 
 tot_arrest_shp$tot_arrest_cat <- cut(tot_arrest_shp$tot_arrest, 
-                                     breaks = c(0, 250,500,750,1000,1250), 
-                              labels = c("250","500","750","1000","1250"))
+                  breaks = c(0, 500,1000,1500, 2000,2500, 3000, 3500,4000), 
+                  labels = c("500","1000","1500", "2000", "2500", "3000", "3500", "4500"))
 
 tot_arrest_shp %>%
   filter(!is.na(tot_arrest_cat)) %>%
@@ -170,29 +189,42 @@ ggplot(.) +
   theme_void() +
   scale_fill_brewer(palette = "RdPu", na.value = "grey80",
                   name="Total Arrests") +
-  ggtitle("Chicago Arrests by Police Beat, 2018") +
+  ggtitle("Chicago Arrests by Community Area, 2018") +
     theme(panel.grid.major = element_line("transparent"), 
         axis.text = element_blank(),
         text=element_text(family="Noto Serif")) 
+```
 
-sum(tot_arrest_shp$tot_arrest, na.rm=T)
+The above map shows total crime arrests by community area in 2018. Areas with highest crime arrests counts are in the the west side, followed by central and south Chicago.
+
+
+
+
+```{r}
+# join crime data
+chi <- chi %>%
+  left_join(., commun_demo, by="area_num_1") 
+ 
+chi_shp <- commun_area %>%
+  left_join(., chi, by="area_num_1")
 ```
 
 
 ```{r}
-# all reported crimes by police beat
-
+# Crime counts by community area
+# all reported crimes by community area
 tot_crime_data <- chi %>%
-  group_by(beat_num) %>%
+  group_by(area_num_1) %>%
   mutate(tot_crime = n()) %>%
-  select(beat_num, tot_crime) %>%
+  select(area_num_1, tot_crime) %>%
   distinct()
 
-tot_crime_shp <- left_join(beats_shp, tot_crime_data, by="beat_num") #
+tot_crime_shp <- left_join(commun_area, tot_crime_data, by="area_num_1") #
 
-tot_crime_shp$tot_crime_cat <- cut(tot_crime_shp$tot_crime, 
-                                     breaks = c(0, 500,1000,1500,2000,2500,3000,3500), 
-                          labels = c("500","1000", "1500","2000","2500", "3000", "3500"))
+tot_crime_shp$tot_crime_cat <- with(tot_crime_shp, cut(tot_crime,
+   breaks = qu <- quantile(tot_crime, probs = seq(0,1, by=0.2)),
+   labels = qu[-1], include.lowest=TRUE))
+
 
 tot_crime_shp %>%
   filter(!is.na(tot_crime_cat)) %>%
@@ -201,16 +233,90 @@ ggplot(.) +
   theme_void() +
   scale_fill_brewer(palette = "YlGnBu", na.value = "grey80",
                   name="Total Crimes") +
-  ggtitle("Chicago Crimes Reported by Police Beat, 2018") +
+  ggtitle("Chicago Crimes Reported by Community Area, 2018") +
     theme(panel.grid.major = element_line("transparent"), 
         axis.text = element_blank(),
         text=element_text(family="Noto Serif")) 
 ```
 
+
+This map shows the total number of crimes reported by community area in 2018. Noteably, the number of crimes reported by community area are in the same quantile for both west and central Chicago, yet the previous map showed a greater number of arrests in the west side relative to central Chicago. 
+
+
+```{r}
+# crime rate per 100,000 people in 2018
+crime_rate <- chi_shp %>%
+  group_by(area_num_1) %>%
+  mutate(crime_rate = (n()/ TOT_POP)*1000) %>%
+  ungroup() %>%as.data.frame() %>%
+  select(area_num_1, crime_rate) %>%
+  distinct()
+
+crime_rate_shp <- commun_area %>%
+  left_join(., crime_rate, by="area_num_1") 
+
+crime_rate_shp$crime_rate_cat <- cut(crime_rate_shp$crime_rate, 
+                  breaks = c(0, 50,100,150, 200,250, 300, 350), 
+                  labels = c("50","100","150", "200", "250", "300", "350"))
+
+ggplot(crime_rate_shp, aes(fill=as.factor(crime_rate_cat))) +
+  geom_sf() +
+  theme_void() +
+    scale_fill_brewer(palette = "YlOrRd", na.value = "grey80",
+                  name="Crime Rate") +
+  theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif"),
+        plot.title = element_text(hjust=.3))  +
+  ggtitle("Chicago Crime Rate per 1,000 people by Community Area, 2018")
+```
+
+
+This map shows the standardized rate of crime reported per 1,000 people by community area. Again, we see clusterings of higher crime rates in the west side, south part of Chicago as well as central.
+
+
+
+
+```{r}
+# Black population
+comm_dem_shp <- commun_area %>%
+  left_join(., commun_demo, by="area_num_1") %>%
+  group_by(area_num_1) %>%
+  mutate(prop_white = WHITE / TOT_POP,
+         prop_black = BLACK / TOT_POP)
+
+ggplot(comm_dem_shp, aes(fill=prop_black)) +
+  geom_sf() +
+  theme_void() +
+  scale_fill_gradient(low = "orange", high = "darkblue", 
+                      name = "",
+                      labels = percent) +
+  ggtitle("Black population by Community Area, 2017") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif"))
+```
+
+
+The black population comprises nearly 30% of Chicago's population, over double the nationwide black population (~13.5% in 2019). The map above visualizes the proportion of black population by community area.
+
+Strikingly, when examining this map in relation to the previous on crime rates, one see a close correlation between areas of high crime rates and large black populations.
+
+
 ********************************************************************************
 
-Spatially?
-Lights?
+## 311 Light Outages Analysis
+
+Data comes from [Chicago 311 Data](https://data.cityofchicago.org/Service-Requests/311-Service-Requests-Street-Lights-All-Out-Histori/zuxi-7xem/data).
+
+#### What is the relationship between street light outages and Chicago crime rates?
+
+I wanted to explore the relationship between city infrastructure and crime rates. I use Chicago 311 complaints data to examine the relationship between street light outages and crime rates in Chicago.
+
+Some notes:
+- light outages could be thought of as a proxy for governmental investment and maintenance of the community--all of which get at the question of how city infrastructure relates to crime rates. 
+- this analysis only correlational - no claims can be made about the causal relationship between light outages and crime rates
+
 
 ```{r}
 library(tidyverse)
@@ -241,12 +347,7 @@ lights_out <- allout %>% rbind(.,oneout)
 ```
 
 
-What areas had more duplicated requests?
-```{r}
-
-```
-
-
+This is the distirbution for how long it takes for a street light complaint to get fixed. The median number of days it takes is 2, but in some instances it took over 100 days to get street lights fixed.
 
 ```{r}
 lights_out <- lights_out %>%
@@ -254,157 +355,67 @@ lights_out <- lights_out %>%
   mutate(time_to_complete_all = completion_date- creation_date) %>%
   group_by(`Type of Service Request`) %>%
   mutate(time_to_complete_status = completion_date- creation_date)
-
-ggplot(lights_out, aes(time_to_complete_all)) + 
-  geom_histogram() +
-  ggtitle('Distribution of Time to Complete in Days')
-```
-
-```{r}
-quantile(as.numeric(lights_out$time_to_complete_all))
-mean(as.numeric(lights_out$time_to_complete_all))
 ```
 
 
 ```{r}
 ggplot(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",],
-       aes(time_to_complete_status)) + 
+       aes(time_to_complete_status)) +
   geom_histogram() +
-  ggtitle('Distribution of Time to Complete in Days - All/Out')
+  ggtitle('Distribution of Time to Complete in Days - All/Out') +
+  theme_classic() +
+  xlab("number of days to complete")
 ```
 
 
 ```{r}
-ggplot(lights_out[lights_out$`Type of Service Request`=="Street Light Out",],
-       aes(time_to_complete_status)) + 
-  geom_histogram() +
-  ggtitle('Distribution of Time to Complete in Days - Street Light Out')
+# ggplot(lights_out[lights_out$`Type of Service Request`=="Street Light Out",],
+#        aes(time_to_complete_status)) + 
+#   geom_histogram() +
+#   ggtitle('Distribution of Time to Complete in Days - Street Light Out') +
+#   theme_classic() +
+#   xlab("number of days to complete")
 ```
 
 ```{r}
+### Quantiles
+
 quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
 mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
-
-
-quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
-mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
+# 
+# 
+# quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
+# mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
 ```
 
-
-**********************************************************************
-
-Remove outliers
-```{r}
-#find Q1, Q3, and interquartile range for values in column A
-Q1 <- quantile(as.numeric(lights_out$time_to_complete_all), .25)
-Q3 <- quantile(as.numeric(lights_out$time_to_complete_all), .75)
-IQR <- IQR(as.numeric(lights_out$time_to_complete_all))
-
-#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
-no_outliers <- subset(lights_out, as.numeric(lights_out$time_to_complete_all)> (Q1 - 1.5*IQR) & as.numeric(lights_out$time_to_complete_all)< (Q3 + 1.5*IQR))
-
-#view row and column count of new data frame
-dim(no_outliers) 
-
-ggplot(data=no_outliers, aes(as.numeric(time_to_complete_all))) +
-  geom_histogram() +
-  ggtitle("Distribution of Time to Complete in Days - Outliers Removed")
-```
-
-```{r}
-mean(as.numeric(no_outliers$time_to_complete_all))
-```
-
-
-********************************************
-
-```{r}
-#find Q1, Q3, and interquartile range for values in column A
-Q1 <- quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status), .25)
-Q3 <- quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status), .75)
-IQR <- IQR(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
-
-
-#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
-no_outliers <- subset(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",], as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status)> (Q1 - 1.5*IQR) & as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status)< (Q3 + 1.5*IQR))
-
-#view row and column count of new data frame
-dim(no_outliers) 
-
-ggplot(data=no_outliers, aes(as.numeric(time_to_complete_status))) +
-  geom_histogram()
-```
-
-```{r}
-mean(as.numeric(no_outliers$time_to_complete_all))
-```
-
-********************************************
-
-```{r}
-#find Q1, Q3, and interquartile range for values in column A
-Q1 <- quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status), .25)
-Q3 <- quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status), .75)
-IQR <- IQR(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
-
-
-#only keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
-no_outliers <- subset(lights_out[lights_out$`Type of Service Request`=="Street Light Out",], as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status)> (Q1 - 1.5*IQR) & as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status)< (Q3 + 1.5*IQR))
-
-#view row and column count of new data frame
-dim(no_outliers) 
-
-ggplot(data=no_outliers, aes(as.numeric(time_to_complete_status)))  +
-  geom_histogram()
-```
-
-```{r}
-mean(as.numeric(no_outliers$time_to_complete_all))
-```
 
 **************************************************
 
 ```{r}
-# remove na lat/long
+# remove na lat/long -- not that many observations (if time, could geocode)
 lights_out <- lights_out %>%
   filter(!is.na(Latitude))
 # convert dataframe to spaital data
-lights_out_sf <- st_as_sf(lights_out, coords = c("Longitude", "Latitude"), crs = st_crs(beats_shp))
+lights_out_sf <- st_as_sf(lights_out, coords = c("Longitude", "Latitude"), crs = st_crs(commun_area))
 
-beats_lights_shp <- beats_shp %>%
+comm_lights_shp <- commun_area %>%
   st_join(lights_out_sf) 
 
 ### complete by community area
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ************************************************************************
 
-### BY BEAT NUMBER
-
-#### Occurances
+### Light Outages Occurances
 
 ```{r}
-beats_lights_shp %>%
+comm_lights_shp %>%
   filter(`Type of Service Request`=="Street Lights - All/Out") %>%
-  group_by(beat_num) %>%
+  group_by(area_num_1) %>%
   mutate(num_out =n(),
          num_out_cat = cut(num_out,
-                 breaks = c(0, 50,100,150,200), 
-                              labels = c("50","100","150","200")) 
+                 breaks = c(0, 100,200,300,400,500,600), 
+                              labels = c("100","200","300","400","500", "600")) 
          ) %>%
   ggplot() +
     geom_sf(aes(fill=as.factor(num_out_cat))) +
@@ -412,82 +423,51 @@ beats_lights_shp %>%
     scale_fill_brewer(
                   na.value = "grey80",
                   name="Number of All\nLights Out Complaints") +
-  ggtitle("Number of 311 All Lights Out Complaints by Police Beat, 2018") +
-    theme(panel.grid.major = element_line("transparent"), 
+  ggtitle("Number of 311 All Lights Out Complaints by Community Area, 2018") +
+  theme(panel.grid.major = element_line("transparent"), 
         axis.text = element_blank(),
-        text=element_text(family="Noto Serif")) 
+        text=element_text(family="Noto Serif"),
+        plot.title = element_text(hjust=.1))  
 ```
 
+The west side of Chicago had the largest number of street light outage complaints in 2018 compared to any other community area. 
+
+*************************************************
+
+*Outages standardized*
 
 ```{r}
-beats_lights_shp %>%
-  filter(`Type of Service Request`=="Street Light Out") %>%
-  group_by(beat_num) %>%
-  mutate(num_out =n(),
-         # num_out_cat = cut(num_out,
-         #         breaks = c(0, 50,100,150,200, 250, 300), 
-         #                      labels = c("50","100","150","200", "250", "300")) 
-          num_out_cat = cut(num_out,
-                 breaks = c(0,100,200,  300), 
-                              labels = c("100","200", "300")) 
-         ) %>%
-  ggplot() +
-    geom_sf(aes(fill=as.factor(num_out_cat))) +
-    theme_void() +
-    scale_fill_brewer(
-                  na.value = "grey80",
-                  name="Number of Light Out Complaints") +
-  ggtitle("Number of 311 Light Out Complaints by Police Beat, 2018") +
-    theme(panel.grid.major = element_line("transparent"), 
-        axis.text = element_blank(),
-        text=element_text(family="Noto Serif")) 
-```
-
-
-#### Time to Complete
-
-
-```{r}
-beats_lights_shp %>%
+comm_lights_shp %>%
+  left_join(., commun_demo, by="area_num_1") %>%
   filter(`Type of Service Request`=="Street Lights - All/Out") %>%
-  group_by(beat_num) %>%
-  mutate(num_out =as.numeric(median(time_to_complete_status)),
-         num_out_cat = cut(num_out,
-                 breaks = c(0, 1,2,4,194),
-                              labels = c("25%","50%","75%","100% "))
+  group_by(area_num_1) %>%
+  mutate(num_out =n(),
+         num_out_stand = (num_out/TOT_POP)*1000,
+         num_out_stand_cat = cut(num_out_stand,
+                 breaks = c(0, 5,10,15,20,25), 
+                              labels = c("5","10","15","20","25")) 
          ) %>%
   ggplot() +
-    geom_sf(aes(fill=as.factor(num_out_cat))) +
+    geom_sf(aes(fill=as.factor(num_out_stand_cat))) +
     theme_void() +
     scale_fill_brewer(
                   na.value = "grey80",
-                  name="Number of All\nLights Out Complaints") +
-  ggtitle("Number of 311 All Lights Out Complaints by Police Beat, 2018") +
-    theme(panel.grid.major = element_line("transparent"), 
+                  name="") +
+  ggtitle("Number of 311 All Lights Out Complaints per 1,000 by Community Area, 2018") +
+  theme(panel.grid.major = element_line("transparent"), 
         axis.text = element_blank(),
-        text=element_text(family="Noto Serif")) 
+        text=element_text(family="Noto Serif"),
+        plot.title = element_text(hjust=.5, size=10))  
 ```
 
 
-```{r}
-quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
-mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Lights - All/Out",]$time_to_complete_status))
-```
+Standardized for population, the south part of Chicago had the greatest number of all light out complaints per 1,000 people by community area.
 
 
 
-```{r}
-quantile(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
-mean(as.numeric(lights_out[lights_out$`Type of Service Request`=="Street Light Out",]$time_to_complete_status))
-```
+********************************************************************
 
-
-
-
-
-****************************************************************
-
-### What is the relationship betwwen light outages and crime?
+### What is the relationship between light outages and crime?
 
 ```{r}
 # join light outage data with crime data
@@ -496,124 +476,322 @@ crime_lights <- chi %>%
   mutate(crime_n_by_date = n()) %>%
   select(Date_simp, crime_n_by_date) %>%
   rename("creation_date"="Date_simp") %>%
-  distinct(creation_date, .keep_all=T)
-  right_join(., lights_out, by = c("Date_simp" = "creation_date"))
-
-lights_out
+  distinct(creation_date, .keep_all=T) %>%
+  right_join(., lights_out, by = c("creation_date"))
 ```
 
 
-
-******************************************************************
-
-### Where are the outliers occuring?
-
-Areas with the slowest median responses
-```{r}
-outlier_beats <- unique(beats_lights_shp %>%
-  filter(`Type of Service Request`=="Street Lights - All/Out") %>%
-  group_by(beat_num) %>%
-  mutate(num_out =as.numeric(median(time_to_complete_status))) %>%
-  filter(num_out>4) %>%
-  pull(beat_num))
-
-beats_lights_shp %>%
-  mutate(indic = ifelse(beat_num %in%outlier_beats,1,0)) %>%
-ggplot() +
-    geom_sf(aes(fill=as.factor(indic))) +
-    theme_void() 
-```
-
-
-Areas with the fastest median responses
-```{r}
-bestoutlier_beats <- unique(beats_lights_shp %>%
-  filter(`Type of Service Request`=="Street Lights - All/Out") %>%
-  group_by(beat_num) %>%
-  mutate(num_out =as.numeric(median(time_to_complete_status))) %>%
-  filter(num_out<=1) %>%
-  pull(beat_num))
-
-beats_lights_shp %>%
-  mutate(indic = ifelse(beat_num %in%bestoutlier_beats,1,0)) %>%
-ggplot() +
-    geom_sf(aes(fill=as.factor(indic))) +
-    theme_void() 
-```
-
-
-Is this the same for one light out compalints?
-
-Areas with the slowest median responses
-```{r}
-outlier_beats <- unique(beats_lights_shp %>%
-  filter(`Type of Service Request`=="Street Light Out") %>%
-  group_by(beat_num) %>%
-  mutate(num_out =as.numeric(median(time_to_complete_status))) %>%
-  filter(num_out>12) %>%
-  pull(beat_num))
-
-beats_lights_shp %>%
-  mutate(indic = ifelse(beat_num %in%outlier_beats,1,0)) %>%
-ggplot() +
-    geom_sf(aes(fill=as.factor(indic))) +
-    theme_void() 
-```
-
-
-
-************************************************************************
-
-Median number of days with all data
-```{r}
-beats_lights_shp %>%
-  filter(`Type of Service Request`=="Street Lights - All/Out") %>%
-  group_by(beat_num) %>%
-  mutate(time_to_complete =median(as.numeric(time_to_complete_all))) %>%
-  ggplot() +
-    geom_sf(aes(fill=as.factor(time_to_complete)))
-```
+In order to understand the relationship between light outages and crime, I first had to calculate the total number of lights out on any given day by community area. The general question of interet being does a greater number of light outages correlate with a higher daily crime rates?
 
 
 ```{r}
-beats_lights_shp %>%
-  filter(`Type of Service Request`=="Street Light Out") %>%
-  group_by(beat_num) %>%
-  mutate(time_to_complete =median(as.numeric(time_to_complete_all))) %>%
-  ggplot() +
-    geom_sf(aes(fill=as.factor(time_to_complete)))
+##### number of outages on any given day 
+lights_out_sub <- lights_out %>%
+  ungroup() %>%
+  rename(area_num_1 = `Community Area`) %>%
+  mutate(area_num_1 = as.character(area_num_1)) %>%
+  select(area_num_1, `Service Request Number`, creation_date, completion_date, time_to_complete_status) 
+
+report <- data.frame(date = seq(from = as.Date("2018-01-01"), by="1 day", length.out = 404),
+                     count = rep(0,times=404))
+
+c_row <- 0 
+for (i in 1:nrow(lights_out_sub)){
+  v <- seq(from = as.Date(lights_out_sub$creation_date[i]), by="1 day", 
+      length.out = as.numeric(lights_out_sub$time_to_complete_status[i]))
+  
+  for (j in as.list(v)) {
+    report[report$date==j ,]$count <- report[report$date==j ,]$count + 1
+  }
+  
+  c_row <- c_row + 1
+  # if (c_row%%1000 == 0){
+  #   print(c_row)
+  # }
+}
 ```
-
-
-
-
-******************************************************************************
-```{r}
-beats_shp %>% 
-  group_by(`Community Area`) %>% 
-  st_cast() 
-
-chi
-```
-
-
-
-
-
-
-
-******************************************************************************
 
 ```{r}
-police_districts <- beats_shp %>% 
-  group_by(district) %>% 
-  st_cast() 
+##### number of outages on any given day in a community area
 
+final_repot <- data.frame(matrix(ncol = 3, nrow = 0))
+for (area_num in unique(lights_out_sub$area_num_1)) {
+  # print(area_num)
+  
+  lo_grp <- lights_out_sub %>%
+    filter(area_num_1==area_num)
+  
+  report_comm <- data.frame(date = seq(from = as.Date("2018-01-01"), by="1 day", length.out = 404),
+                     count = rep(0,times=404),
+                     area_num = rep(area_num,times=404))
+  
+  for (i in 1:nrow(lo_grp)){
+    v <- seq(from = as.Date(lo_grp$creation_date[i]), by="1 day", 
+        length.out = as.numeric(lo_grp$time_to_complete_status[i]))
+
+    
+        for (j in as.list(v)) {
+          report_comm[report_comm$date==j ,]$count <- report_comm[report_comm$date==j ,]$count + 1
+        }
+        
+        # rbind report at the end of group loop
+        if (i==max(nrow(lo_grp))) {
+          final_repot <- rbind(final_repot,report_comm)
+        }
+
+  }
+}
+# st_write(commun_area, "./output-data/commun_area.shp")
+```
+
+
+**********************************************************************
+
+For simplicity in analysis, I just chose one month to look at, July. Further analysis should explore these trends overtime as well as at potentially smaller geographic units.
+
+
+```{r}
+# average number of light outages in July by community area
+july_val <- final_repot %>%
+  mutate(date = as.Date(date),
+         month = month(date)) %>%
+  filter(month==7) %>%
+  group_by(area_num) %>%
+  summarise(m = mean(count)) %>%
+  rename(area_num_1 = area_num) 
+```
+
+
+This map shows the number of incomplete light out complaints by 1,000 people in the month of July. There were a greater standardized number of complaints in the southern part of Chicago relative to the north.
+
+```{r}
+# average number of light outages in July by community area
+july_val <- final_repot %>%
+  mutate(date = as.Date(date),
+         month = month(date)) %>%
+  filter(month==7) %>%
+  group_by(area_num) %>%
+  summarise(m = mean(count)) %>%
+  rename(area_num_1 = area_num) 
+
+# number of light outages in July by community area --- standardized
+july_val_pop <- july_val %>%
+  left_join(., commun_demo, by="area_num_1") %>%
+    mutate(num_out =n(),
+         num_out_stand = (num_out/TOT_POP)*1000,
+         num_out_stand_cat = cut(num_out_stand,
+                 breaks = c(0, 5,10,15,20,25), 
+                              labels = c("5","10","15","20","25")) 
+         ) 
+
+july_val_pop$num_out_stand_cat_quant <- with(july_val_pop, cut(num_out_stand,
+   breaks = qu <- quantile(num_out_stand, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = round(qu[-1],2), include.lowest=TRUE))
+
+commun_area %>%
+  left_join(., july_val_pop, by="area_num_1") %>%
+  ggplot(., aes(fill=as.factor(num_out_stand_cat_quant))) +
+  geom_sf() +
+  theme_void() +
+    scale_fill_brewer(
+                  na.value = "grey80",
+                  name="") +
+  ggtitle("Number of Incomplete All Lights Out Complaints per 1,000 by Community Area, July 2018") +
+  theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif"),
+        plot.title = element_text(hjust=.5, size=10)) 
 ```
 
 
 ```{r}
-police_districts %>%
-  left_join(., no_outliers, by)
+# crime rate in July by community area --- standardized
+# all times of day
+
+# crime_rate_july <- chi_shp %>%
+#   filter(month==7) %>%
+#   group_by(area_num_1) %>%
+#   mutate(crime_rate = (n()/ TOT_POP)*1000) %>%
+#   ungroup() %>%as.data.frame() %>%
+#   select(area_num_1, crime_rate) %>%
+#   distinct()
+# 
+# crime_rate_shp_july <- commun_area %>%
+#   left_join(., crime_rate_july, by="area_num_1") 
+# 
+# crime_rate_shp_july$crime_rate_cat_quant <- with(crime_rate_shp_july, 
+#                                                     cut(crime_rate,
+#    breaks = qu <- quantile(crime_rate, probs = seq(0,1, by=0.2), na.rm=T),
+#    labels = round(qu[-1],2), include.lowest=TRUE))
+# 
+# ggplot(crime_rate_shp_july, aes(fill=as.factor(crime_rate_cat_quant))) +
+#   geom_sf() +
+#   theme_void() +
+#     scale_fill_brewer(palette = "YlOrRd", na.value = "grey80",
+#                   name="Crime Rate") +
+#   theme(panel.grid.major = element_line("transparent"), 
+#         axis.text = element_blank(),
+#         text=element_text(family="Noto Serif"),
+#         plot.title = element_text(hjust=.3))  +
+#   ggtitle("Chicago Crime Rate per 1,000 people by Community Area, July 2018")
 ```
+
+Next, I map Chicgo nightly crime rate per 1,000 people by community area for the same month. The reason I map nightly crime rate is because the idea is that light outages would be most important or impactful of night activity. (Rates, not restricted by time, occur in these same locations).
+
+There is large overlap between areas with high crime rates and larger number of lights out complaints, particularly in the southern part of Chicago.
+
+```{r}
+# average night crime rate in July by community area --- standardized
+
+crime_rate_july <- chi_shp %>%
+  mutate(time = hms::as_hms(time)) %>%
+  filter(month==7,
+         time >=hms::as_hms('21:00:00') | time <=hms::as_hms('6:00:00')
+         ) %>%
+  group_by(area_num_1) %>%
+  mutate(crime_rate = (n()/ TOT_POP)*1000) %>%
+  ungroup() %>%as.data.frame() %>%
+  select(area_num_1, crime_rate) %>%
+  distinct()
+
+crime_rate_shp_july <- commun_area %>%
+  left_join(., crime_rate_july, by="area_num_1") 
+
+crime_rate_shp_july$crime_rate_cat_quant <- with(crime_rate_shp_july, 
+                                                    cut(crime_rate,
+   breaks = qu <- quantile(crime_rate, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = round(qu[-1],2), include.lowest=TRUE))
+
+ggplot(crime_rate_shp_july, aes(fill=as.factor(crime_rate_cat_quant))) +
+  geom_sf() +
+  theme_void() +
+    scale_fill_brewer(palette = "YlOrRd", na.value = "grey80",
+                  name="Crime Rate") +
+  theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif"),
+        plot.title = element_text(hjust=.3))  +
+  ggtitle("Chicago Nightly Crime Rate per 1,000 people by Community Area, July 2018")
+```
+
+*******************************************************************
+
+
+```{r}
+## daily nightly crime rate
+## daily light outages per 1,000
+
+crime_rate_july_daily <- chi_shp %>%
+  mutate(time = hms::as_hms(time)) %>%
+  filter(month==7,
+         time >=hms::as_hms('21:00:00') | time <=hms::as_hms('6:00:00')
+         ) %>%
+  group_by(area_num_1,Date_simp) %>%
+  mutate(crime_rate = (n()/ TOT_POP)*1000) %>%
+  ungroup() %>%as.data.frame() %>%
+  select(area_num_1, Date_simp, crime_rate) %>%
+  distinct()
+
+daily_july_out_stand <- final_repot %>%
+  rename(area_num_1 = area_num) %>%
+  left_join(., commun_demo, by="area_num_1") %>%
+  group_by(area_num_1,date) %>%
+    mutate(num_out_stand = (count/TOT_POP)*1000,
+           date = as.Date(date),
+         month = month(date)) %>%
+  filter(month==7) %>%
+  select(area_num_1, date, num_out_stand)
+
+the_data <- crime_rate_july_daily %>%
+  rename(date = Date_simp) %>%
+  left_join(., daily_july_out_stand, by=c("area_num_1", "date"))
+```
+
+
+**GWR: Geographically Weighted Regression**
+
+Finally, I run a geographically weighted regression model. This is an exploratory technique to examine the relationship between variables accross space. In contrast to a standard OLS model that gives a globalized coefficient, a GWR allows the coefficient to vary by location. For this analysis, I examine the relationship between daily light outages and daily crime rates in the month of July by community area.
+
+
+```{r}
+library(spgwr)
+
+gwr_df <- commun_area %>%
+  left_join(., the_data, by="area_num_1")
+
+gwr_df_cent <- st_centroid(gwr_df)
+
+gwr_df_cent <- gwr_df_cent %>%
+  mutate(seq_day = day(date)
+)
+
+GWRbandwidth <- gwr.sel(crime_rate~num_out_stand+as.factor(seq_day),
+                        data=gwr_df_cent, 
+                        coords=st_coordinates(gwr_df_cent),adapt=T)
+
+#run the gwr model
+gwr.model = gwr(crime_rate~num_out_stand+as.factor(seq_day),
+                        data=gwr_df_cent, 
+                        coords=st_coordinates(gwr_df_cent),
+                adapt=GWRbandwidth, hatmatrix=TRUE, se.fit=TRUE) 
+
+#extract results for each variable
+results<-as.data.frame(gwr.model$SDF)
+```
+
+```{r message=F}
+#attach coefficients to original dataframe
+gwr_df_cent$coefest_num_out_stand<-results$num_out_stand
+
+gwr_df_cent$coefbls_as.factor.seq_day.10<-results$as.factor.seq_day.10
+
+summary(results$num_out_stand) #same summary data as you see in gwr.model object
+```
+
+
+```{r}
+#now plot the various GWR coefficients
+
+# What is the relationship between community area daily light outages and daily crime rate across Chicago? Is the relationship uniform?
+library(leaflet)
+library(leaflet.providers)
+
+qpal<-colorQuantile("OrRd", gwr_df_cent$coefest_num_out_stand, n=9) 
+
+st_crs(commun_area) <- '+proj=longlat +datum=WGS84'
+st_crs(gwr_df_cent) <- '+proj=longlat +datum=WGS84'
+
+leaflet(gwr_df_cent) %>%
+  addTiles() %>%  
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(data=commun_area, color = "black", fillOpacity = 0, opacity=1, weight=1) %>%
+  addCircleMarkers(radius=3,color = ~qpal(gwr_df_cent$coefest_num_out_stand)
+  ) %>%
+  addLegend(position = "bottomright",
+              pal = qpal, values = ~gwr_df_cent$coefest_num_out_stand,
+              title = "Standardized Lights Out Residuals")
+
+
+```
+
+
+The plot above allows us to visually examine the model's outputs, with darker regions indiciating a stronger relationship between variables. The map indicates that the relationship between daily number of lights out per 1,000 and crime rate is not uniform accross the city of Chicago, rather, the relationship between these two variables is stronger, or has a larger effect size, in the central and sourthern regions of the city. 
+
+*********************************************************
+
+This is an simple analysis of the relationship between city infrastructure and crime rates in the city of Chicago in 2018. Much more analysis can and should be done.
+
+
+Questions to consider and explore further:
+
+Does reported crime and arrest data accurately reflect the level of crime in neighborhoods? Is policing a cause or the symptom of crime?
+
+How does the relationship between crime reporting / arrests and light outages change, if at all, after Chicago Smart Lighting program (started 2019)?
+
+
+City resources could be used to fund city infrastructure, public goods and programs instead of settling lawsuits
+  - Is an increase in police spending associated with a decrease in crime? Or is there something else?
+
+
+
 
