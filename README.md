@@ -56,3 +56,29 @@ Project files:
 
 - project2.html
   - knitted output file from project2.Rmd 
+  
+  
+  
+*******************************************************
+
+### Predicting Poverty with Night Lights Data
+
+**India, 2011**
+
+[<img src="https://img.etimg.com/thumb/msid-58165420,width-640,resizemode-4,imgsize-92949/india-from-space.jpg" width="200">]()
+
+<br>
+
+Data comes from 
+  - [India Night Lights API](http://india.nightlights.io/#/nation/2006/12)
+  - [India 2011 Census](https://censusindia.gov.in/2011-common/censusdata2011.html)
+
+
+Project files:
+
+- project3.Rmd
+  - maps showing India Census demographics, night lights, and GDP by districts. Regression models to examine to correlation between GDP and night lights in a district.  
+
+
+- project3.html
+  - knitted output file from project3.Rmd 
