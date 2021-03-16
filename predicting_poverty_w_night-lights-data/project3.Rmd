@@ -1,0 +1,536 @@
+---
+title: "DSPP Project 3"
+author: "Kristen Akey, kka2120"
+date: "3/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+```
+
+```{r}
+library(tidyverse)
+library(sf)
+library(biscale)
+```
+
+```{r}
+# load districts shapefile
+districts <- read_sf("./raw-data/India_Districts_ADM2_GADM/India_Districts_ADM2_GADM.shp")
+```
+
+
+```{r}
+# india-districts-census-2011.csv
+india_census <- read_csv("./raw-data/india-districts-census-2011.csv")
+```
+
+```{r}
+# summary statistics
+india_census %>%
+  mutate(tot_pop = sum(Population),
+         lit_rate = mean((Male_Literate + Female_Literate)/ Population),
+         elec_household_rate =  mean(Housholds_with_Electric_Lighting/Households),
+         water_household_rate = 
+           mean(Location_of_drinking_water_source_Within_the_premises_Households/
+                  Households),
+         internet_rate = 
+           mean(Households_with_Internet/
+                  Households),
+          rural_households = mean(Rural_Households/Households)
+         ) %>%
+  select(tot_pop, lit_rate,elec_household_rate,water_household_rate, internet_rate,
+         rural_households) %>%
+  distinct() %>%
+  knitr::kable()
+
+```
+
+
+```{r}
+districts <- districts %>%
+  rename(`District code` = FID) %>%
+  left_join(., india_census, on="District")
+
+### Population
+# Male_Literate
+# Female_Literate
+
+## Households
+# Housholds_with_Electric_Lighting
+# Households_with_Internet
+# Households_with_Computer
+# Rural_Households
+# Urban_Households
+# Below_Primary_Education
+# Households_with_Television
+# Households_with_separate_kitchen_Cooking_inside_house
+# Not_having_bathing_facility_within_the_premises_Total_Households
+# Location_of_drinking_water_source_Within_the_premises_Households
+
+# Married_couples_3_or_more_Households
+
+## Total_Education
+# educ <- c("Below_Primary_Education", "Primary_Education", "Middle_Education", "Secondary_Education", "Higher_Education", "Graduate_Education", "Other_Education")
+
+districts <- districts %>%
+  group_by(`District code`) %>%
+  mutate(prop_literate = (Male_Literate + Female_Literate)/Population,
+         prop_households_w_elec_lighting = 
+            Housholds_with_Electric_Lighting / Households,
+         prop_households_rural = Rural_Households / Households,
+         prop_households_urban = Urban_Households / Households,
+         prop_below_primary_educ = 
+           Below_Primary_Education / Total_Education,
+         prop_households_w_tv = Households_with_Television / Households,
+         prop_households_w_internet = Households_with_Internet / Households,
+         prop_bath_not_in_home = Not_having_bathing_facility_within_the_premises_Total_Households / Households,
+          prop_water_in_home = Location_of_drinking_water_source_Within_the_premises_Households / Households)
+```
+
+************************************************************************
+
+```{r}
+districts$Population_quant <- with(districts, 
+                                      cut(Population,
+   breaks = qu <- quantile(Population, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = round(qu[-1],2), include.lowest=TRUE))
+
+ggplot(data=districts) + 
+  geom_sf(aes(fill=Population_quant),size=.03) +
+  theme_void() +
+  scale_fill_brewer(palette = "Reds", na.value = "grey80",
+                    name="Population") +
+  ggtitle("Population, India 2011") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif"),
+        plot.title = element_text(hjust = .5, vjust=-.6),
+        plot.background = element_rect(fill="white", color=NA)) +
+  ggsave("population.png", dpi=300)
+```
+
+
+
+
+************************************************************************
+
+rural/urban areas
+
+```{r}
+districts$prop_households_rural_quant <- with(districts, 
+                                      cut(prop_households_rural,
+   breaks = qu <- quantile(prop_households_rural, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = paste0(round(qu[-1],2)*100, "%"), include.lowest=TRUE))
+
+ggplot(data=districts) + 
+  geom_sf(aes(fill=prop_households_rural_quant),size=.03) +
+  theme_void() +
+  scale_fill_brewer(palette = "Oranges", na.value = "grey80", 
+                    name="Percentage Rural") +
+  ggtitle("Rural Households by District, India 2011") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif")) 
+```
+
+
+```{r}
+districts$prop_households_urban_quant <- with(districts, 
+                                      cut(prop_households_urban,
+   breaks = qu <- quantile(prop_households_urban, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = paste0(round(qu[-1],2)*100, "%"), include.lowest=TRUE))
+
+ggplot(data=districts) + 
+  geom_sf(aes(fill=prop_households_urban_quant),size=.03) +
+  theme_void() +
+  scale_fill_brewer(palette = "PuBuGn", na.value = "grey80", 
+                    name="Percentage Urban") +
+  ggtitle("Urban Households by District, India 2011") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif")) 
+```
+
+
+```{r}
+# more ubran vs more rural
+# difference between avacode vs mango production
+districts <- districts %>%
+  mutate(diff_urban_rural = prop_households_urban - prop_households_rural) 
+
+ggplot() +
+  geom_sf(data=districts, aes(fill=diff_urban_rural), size=.1, color="grey10") +
+  scale_fill_gradient2(low = "#ffc324", mid = "grey99",
+        high = "#663399", midpoint = 0, space = "Lab",
+        limit = c(-1,1),
+        breaks = c(-1,-.5,0,.5,1),
+        labels = c("+100%\nrural", "+50%\nrural","Even",
+                                       "+50%\nurban", "+100%\nurban"),
+        name = "") +
+  theme_void() +
+  theme(legend.text = element_text(size=5.5),
+        legend.key.size = unit(.5, "cm"),
+        legend.direction="horizontal",
+        legend.position = c(.35,.009),
+        legend.justification = c(-1,-1.3),
+        plot.background = element_rect(fill="lightblue", color=NA),
+        text=element_text(family="Noto Serif")
+    ) +
+  ggtitle("Urban/Rural Population Dispersion by District, 2011") +
+  ggsave("urban_rural.png",dpi=300)
+```
+
+
+
+************************************************************************
+
+```{r}
+districts$prop_literate_quant <- with(districts, 
+                                      cut(prop_literate,
+   breaks = qu <- quantile(prop_literate, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = paste0(round(qu[-1],2)*100, "%"), include.lowest=TRUE))
+
+ggplot(data=districts) + 
+  geom_sf(aes(fill=prop_literate_quant),size=.03) +
+  theme_void() +
+  scale_fill_brewer(palette = "RdPu", na.value = "grey80", 
+                    name="Percentage\nLiterate") +
+  ggtitle("Literacy Rate by District, India 2011") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        legend.position = c(.6,.2),
+        plot.title = element_text(hjust = .5, vjust=-.6),
+        plot.background = element_rect(fill="white", color=NA),
+        text=element_text(family="Noto Serif")) +
+  ggsave("literacy.png", dpi=300)
+```
+
+
+```{r}
+districts$prop_households_w_internet_quant <- with(districts, 
+                                      cut(prop_households_w_internet,
+   breaks = qu <- quantile(prop_households_w_internet, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = paste0(round(qu[-1],2)*100, "%"), include.lowest=TRUE))
+
+ggplot(data=districts) + 
+  geom_sf(aes(fill=prop_households_w_internet_quant),size=.03) +
+  theme_void() +
+  scale_fill_brewer(palette = "Reds", na.value = "grey80", 
+                    name="Percentage with\nHousehold Internet") +
+  ggtitle("Households with Internet by District, India 2011") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        text=element_text(family="Noto Serif")) 
+```
+
+
+```{r}
+root_api <- 'http://api.nightlights.io/months/2011.3-2011.3/states'
+states <- jsonlite::fromJSON(root_api)
+
+full_lights_df <- data.frame()
+for (state_name in states$key) {
+  root_api <- paste0('http://api.nightlights.io/months/2011.3-2011.3/states/',
+                   state_name,
+                   '/districts')
+  light_data <- jsonlite::fromJSON(root_api)
+  full_lights_df <- rbind(full_lights_df,light_data)
+}
+
+
+# sepearte key for District name
+pattern_2 <- "uttar-pradesh|west-bengal|himachal-pradesh|madhya-pradesh|andhra-pradesh"
+pattern_3 <- "jammu-&-kashmir"
+
+full_lights_df$`District name` <- "-"
+full_lights_df$`State Name` <- "-"
+for (i in 1:length(str_split(full_lights_df$key, pattern="-"))) {
+  
+  words_split <- str_split(full_lights_df$key, pattern="-")[[i]]
+  if (grepl(pattern_2, x=full_lights_df[i,]$key)) {
+      full_lights_df[i,]$`District name` <- paste(words_split[3:length(words_split)],
+                                              collapse=" ")
+      full_lights_df[i,]$`State Name` <- paste(words_split[1:2],
+                                              collapse=" ")
+  }
+  else if (grepl(pattern_3, x=full_lights_df[i,]$key)) {
+      full_lights_df[i,]$`District name` <- paste(words_split[4:length(words_split)],
+                                              collapse=" ")
+      full_lights_df[i,]$`State Name` <- paste(words_split[1],"and",words_split[3],
+                                              collapse=" ")
+  }
+  else {
+      full_lights_df[i,]$`District name` <- paste(words_split[2:length(words_split)],
+                                              collapse=" ")
+      full_lights_df[i,]$`State Name` <- paste(words_split[1],
+                                              collapse=" ")
+  }
+}
+  
+```
+
+```{r}
+full_lights_df <- full_lights_df %>%
+  mutate(`State Name` = toupper(`State Name`),
+         `District name` = str_to_title(`District name`))
+
+full_lights_df[full_lights_df$`District name`=="Y.s.r",]$`District name` <- 'Y.S.R.'
+full_lights_df[full_lights_df$`District name`=="Marigaon",]$`District name` <- 'Morigaon'
+full_lights_df[full_lights_df$`District name`=="Sibsagar",]$`District name` <- 'Sivasagar'
+full_lights_df[full_lights_df$`District name`=="Janjgir   Champa",]$`District name` <- 'Janjgir - Champa'
+full_lights_df[full_lights_df$`State Name`=="DELHI",]$`State Name` <- 'NCT OF DELHI'
+full_lights_df[full_lights_df$`District name`=="Lahul & Spiti",]$`District name` <- 'Lahul AND Spiti'
+full_lights_df[full_lights_df$`District name`=="Leh (Ladakh)",]$`District name` <- 'Leh(Ladakh)'	
+full_lights_df[full_lights_df$`District name`=="Pakaur",]$`District name` <- 'Pakur'	
+full_lights_df[full_lights_df$`District name`=="Saraikela  Kharsawa",]$`District name` <- 'Saraikela-Kharsawan'	
+full_lights_df[full_lights_df$`District name`=="East Nimar",]$`District name` <- 'Khandwa (East Nimar)'	
+full_lights_df[full_lights_df$`District name`=="West Nimar",]$`District name` <- 'Khargone (West Nimar)'	
+full_lights_df[full_lights_df$`District name`=="Ri Bhoi",]$`District name` <- 'Ribhoi'	
+full_lights_df[full_lights_df$`District name`=="North District",]$`District name` <- 'North  District'	
+full_lights_df[full_lights_df$`District name`=="Barabanki",]$`District name` <- 'Bara Banki'
+full_lights_df[full_lights_df$`District name`=="Bulandshahar",]$`District name` <- 'Bulandshahr'	
+
+
+districts <- districts %>%
+  left_join(., full_lights_df, on=c(`State Name`,`District name`))
+districts$vis_median <- as.double(districts$vis_median)
+```
+
+vis_median -- Average median of measurements for this month
+
+```{r}
+districts$vis_median_quant <- with(districts, 
+                                      cut(vis_median,
+   breaks = qu <- quantile(vis_median, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = round(qu[-1],2), include.lowest=TRUE))
+
+ggplot(data=districts) +
+  geom_sf(aes(fill=vis_median_quant), size=.04) +
+  theme_void() +
+  scale_fill_brewer(palette = "YlGnBu", na.value = "grey80", 
+                    name="Average Median\nof Light\nMeasurements") +
+  ggtitle("Lights by District, India March 2011") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        plot.background = element_rect(fill="white", color=NA),
+        plot.title = element_text(hjust=.9,vjust=-4),
+                legend.position = c(.75,.2),
+        text=element_text(family="Noto Serif")) +
+  ggsave("median_lights.png", dpi=300)
+```
+
+
+```{r}
+districts$vis_median_break <- cut(districts$vis_median, 
+                  breaks = c(-1.5500, 0, 8,18, 28, 48,58.3971), 
+                  labels = c("0","8","18", "28", "48", "58"))
+
+ggplot(data=districts) +
+  geom_sf(aes(fill=vis_median_break), size=.04) +
+  theme_void() +
+  scale_fill_brewer(palette = "YlGnBu", na.value = "grey80", 
+                    name="Average Median\nof Light\nMeasurements") +
+  ggtitle("Lights by District, India March 2011") +
+    theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        plot.background = element_rect(fill="white", color=NA),
+        plot.title = element_text(hjust=.9,vjust=-4),
+                legend.position = c(.75,.2),
+        text=element_text(family="Noto Serif")) +
+  ggsave("median_lights_breaks.png", dpi=300)
+
+quantile(districts$vis_median, na.rm=T)
+```
+
+
+
+
+```{r}
+# iterate through files and import and bind all csvs
+library(data.table)
+files <- list.files(path = "./raw-data/India_2011_census_tables/2011", 
+                    full.names = T, recursive = T, pattern = ".csv")
+files <- files[str_sub(files, start= -3)=="csv"]
+full_csv <- c()
+for (f in files) {
+  filename <- str_sub(f, start= 46, end=-6)
+  filenamefull <- read_csv(f) 
+  filenamefull <- filenamefull %>%
+    filter(Year=='2010-11') %>%
+    pivot_longer(cols=colnames(filenamefull)[3:length(colnames(filenamefull))])
+  if (nrow(filenamefull)==0) {
+      filenamefull <- read_csv(f) 
+  filenamefull <- filenamefull %>%
+    filter(Year=='2009-10') %>%
+    pivot_longer(cols=colnames(filenamefull)[3:length(colnames(filenamefull))])
+  }
+  
+  filenamefull$`State Name` <- filename
+  full_csv <- rbind(full_csv, filenamefull)
+}
+
+# add space between lowercase and uppercase
+full_csv$`State Name` <- gsub("([a-z])([A-Z])", "\\1 \\2", full_csv$`State Name`)
+full_csv$`State Name` <- toupper(full_csv$`State Name`)
+full_csv[full_csv$`State Name`=="ODISHA",]$`State Name` <- 'ORISSA'	
+
+full_csv <- full_csv %>%
+  rename(`District name`=name)
+
+# fix district name differences for join
+full_csv[full_csv$`District name`=="Godavari East",]$`District name` <- 'East Godavari'	
+full_csv[full_csv$`District name`=="Mahabubnagar",]$`District name` <- 'Mahbubnagar'	
+full_csv[full_csv$`District name`=="Visakapatnam",]$`District name` <- 'Visakhapatnam'
+full_csv[full_csv$`District name`=="Kamrup (Metropolitan)",]$`District name` <- 'Kamrup Metropolitan'	
+full_csv[full_csv$`District name`=='Kamrup Rural',]$`District name` <- 'Kamrup'	
+full_csv[full_csv$`District name`=="Samstipur",]$`District name` <- 'Samastipur Metropolitan'	
+full_csv[full_csv$`District name`=="Bangalore Urban",]$`District name` <- 'Bangalore'	
+full_csv[full_csv$`District name`=="Chickballapur",]$`District name` <- 'Chikkaballapura'	
+full_csv[full_csv$`District name`=="Chickmagalur",]$`District name` <- 'Chikmagalur'	
+full_csv[full_csv$`District name`=="Davangere",]$`District name` <- 'Davanagere'	
+full_csv[full_csv$`District name`=="Ramnagara",]$`District name` <- 'Ramanagara'	
+full_csv[full_csv$`District name`=="Yadagiri",]$`District name` <- 'Yadgir'	
+full_csv[full_csv$`District name`=="Kasargode",]$`District name` <- 'Kasaragod'	
+full_csv[full_csv$`District name`=="Ahmednagar",]$`District name` <- 'Ahmadnagar'	
+full_csv[full_csv$`District name`=="Gondia",]$`District name` <- 'Gondiya'	
+full_csv[full_csv$`District name`=="Wahim",]$`District name` <- 'Washim'	
+full_csv[full_csv$`District name`=="Yavatnal",]$`District name` <- 'Yavatmal'	
+full_csv[full_csv$`District name`=="Angul",]$`District name` <- 'Anugul'	
+full_csv[full_csv$`District name`=="Deogarh",]$`District name` <- 'Debagarh'	
+full_csv[full_csv$`District name`=="Jagatsinghpur",]$`District name` <- 'Jagatsinghapur'	
+full_csv[full_csv$`District name`=="Jajpur",]$`District name` <- 'Jajapur'	
+full_csv[full_csv$`District name`=="Taran Tarn",]$`District name` <- 'Tarn Taran'	
+full_csv[full_csv$`District name`=="Auraiyya",]$`District name` <- 'Auraiya'	
+full_csv[full_csv$`District name`=="Bagpat",]$`District name` <- 'Baghpat'	
+full_csv[full_csv$`District name`=="Barabanki",]$`District name` <- 'Bara Banki'	
+full_csv[full_csv$`District name`=="BulandShahar",]$`District name` <- 'Bulandshahr'	
+full_csv[full_csv$`District name`=="Etawa",]$`District name` <- 'Etawah'	
+full_csv[full_csv$`District name`=="Kanpur Dehat",]$`District name` <- 'Kanpur: Rural'	
+full_csv[full_csv$`District name`=="Gautambudh Nagar",]$`District name` <- 'Gautam Buddha Nagar'	
+full_csv[full_csv$`District name`=="Kanpur Nagar",]$`District name` <- 'Kanpur: Urban'	
+full_csv[full_csv$`District name`=="Maharajganj",]$`District name` <- 'Mahrajganj'	
+full_csv[full_csv$`District name`=="Sant Kabeer Nagar",]$`District name` <- 'Sant Kabir Nagar'	
+full_csv[full_csv$`District name`=="Sant Ravidas Nagar",]$`District name` <- 'Sant Ravidas Nagar (Bhadohi)'	
+full_csv[full_csv$`District name`=="Shravasti",]$`District name` <- 'Shrawasti'
+full_csv[full_csv$`District name`=="Siddharth Nagar",]$`District name` <- 'Siddharthnagar'
+full_csv[full_csv$`District name`=="24-Parganas (North)",]$`District name` <- 'North Twenty Four Parganas'
+full_csv[full_csv$`District name`=="24-Parganas (South)",]$`District name` <- 'South Twenty Four Parganas'
+full_csv[full_csv$`District name`=="Burdwan",]$`District name` <- 'Barddhaman'
+full_csv[full_csv$`District name`=="Cooch Behar",]$`District name` <- 'Koch Bihar'
+full_csv[full_csv$`District name`=="Darjeeling",]$`District name` <- 'Darjiling'
+full_csv[full_csv$`District name`=="Howrah",]$`District name` <- 'Haora'
+full_csv[full_csv$`District name`=="Hooghly",]$`District name` <- 'Hugli'
+full_csv[full_csv$`District name`=="Malda",]$`District name` <- 'Maldah'
+full_csv[full_csv$`District name`=="Midnapore West",]$`District name` <- 'Paschim Medinipur'
+full_csv[full_csv$`District name`=="Midnapore East",]$`District name` <- 'Purba Medinipur'
+full_csv[full_csv$`District name`=="Purulia",]$`District name` <- 'Puruliya'
+full_csv[full_csv$`District name`=="Godavari West",]$`District name` <- 'West Godavari'
+
+gdp_csv <- full_csv %>%
+  filter(Description=='GDP (in Rs. Cr.)') %>%
+  rename(GDP = value) %>%
+  select(!Description) 
+  
+growth_csv <- full_csv %>%
+  filter(Description=='Growth Rate % (YoY)') %>%
+  rename(growth_rate = value) %>%
+  select(!Description)
+```
+
+```{r}
+districts_gdp <- districts %>%
+  inner_join(., gdp_csv, on=c('State Name','District name'))
+
+districts_growth <- districts %>%
+  inner_join(., growth_csv, on=c('State Name','District name'))
+```
+
+
+```{r}
+districts_gdp$GDP_quant <- with(districts_gdp, 
+                                      cut(GDP,
+   breaks = qu <- quantile(GDP, probs = seq(0,1, by=0.2), na.rm=T),
+   labels = round(qu[-1]), include.lowest=TRUE))
+
+
+ggplot() +
+  geom_sf(data=districts, size=.05) +
+  geom_sf(data=districts_gdp, aes(fill=GDP_quant), size=.05) + 
+  theme_void() +
+  ggtitle("GDP 2011") +
+  theme(panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank(),
+        plot.background = element_rect(fill="white", color=NA),
+        plot.title = element_text(hjust=.9,vjust=-4),
+        legend.position = c(.75,.2),
+        text=element_text(family="Noto Serif")) +
+    scale_fill_brewer(palette = "Greens", na.value = "grey80", name="GDP") +
+  ggsave("gdp.png", dpi=300)
+```
+
+
+
+#### Bivariate map of lights and GDP
+
+```{r}
+# create classes
+data <- bi_class(districts_gdp,x = vis_median, y = GDP, style = "quantile", dim = 3)
+
+map <- ggplot() +
+   geom_sf(data=districts, color="grey20", fill="white",size=.1) +
+  geom_sf(data = data %>%
+            filter(!is.na(vis_median)), 
+          aes(fill = bi_class), 
+          color = "grey20", size = 0.1, show.legend = FALSE) +
+  bi_scale_fill(pal = "DkCyan", dim = 3) +
+  ggtitle("GDP and Lights, India 2011") +
+  theme_void() +
+  theme(text=element_text(family="Noto Serif"),
+        plot.title = element_text(size=12, hjust=.6, vjust=-24),
+        plot.background = element_rect(fill="grey65", color=NA),
+        panel.background = element_rect(fill="grey65", color=NA),
+        panel.grid.major = element_line("transparent"), 
+        axis.text = element_blank())
+
+legend <- bi_legend(pal = "DkCyan",
+                    dim = 3,
+                    xlab = "More Lights ",
+                    ylab = "Higher GDP ",
+                    size = 8.3) +
+  theme(plot.background = element_rect(fill="grey65", color=NA),
+        panel.background = element_rect(fill="grey65", color=NA),
+        panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank())
+
+library(cowplot)
+finalPlot <- ggdraw() +
+  draw_plot(map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.6, .15, 0.2, 0.2) +
+  ggsave("bi_gdp_lights.png",dpi=300)
+```
+
+
+
+*************************************************************************
+#### OLS regression
+
+```{r}
+districts_gdp_log <- districts_gdp %>%
+  mutate(GDP_stand = (GDP/Population)*1000,
+        log_GDP = log(GDP))
+
+# correlation between log GDP and lots
+summary(lm(vis_median ~ log_GDP, data = districts_gdp_log))
+
+summary(lm(log_GDP ~ vis_median, data = districts_gdp_log))
+
+# additional covariates
+m1 <- lm(log_GDP ~ vis_median+prop_households_rural + prop_literate + prop_households_w_elec_lighting + prop_bath_not_in_home, data = districts_gdp_log)
+summary(m1)
+
+m1 <- lm(vis_median ~ log_GDP+prop_households_rural + prop_literate + prop_households_w_elec_lighting + prop_bath_not_in_home, data = districts_gdp_log)
+summary(m1)
+```
+
