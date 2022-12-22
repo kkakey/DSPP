@@ -1,0 +1,819 @@
+---
+title: "Detecting Fake News - df"
+author: "Kristen A, kka2120"
+date: "2/03/2021"
+output: 
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(scales)
+library(ggtext)
+library(tm)
+```
+
+```{r}
+df <- read_csv("./output-data/processed_text2.csv")
+```
+
+```{r}
+df$date <- as.Date(df$`Data de publicação`, format = "%d/%m/%y")
+df$year <- format(substr(df$date, 1, 4), format = "%Y")
+df$month <- format(substr(df$date, 6, 7), format = "%m")
+```
+
+### Descriptive statistics
+
+fake(1) and real(0) news summary statistics
+
+![](/Users/kristenakey/Documents/QMSS/DSPP/detecting_fake_news_project1/output-data/summary-stats.png)
+
+- total_words -- average total number of words in an article
+- sent_length -- average number of sentences in article
+- num_word_unique -- average number of unique words in article
+- num_dict_word_unique -- average number of unique dictionary words in article
+- total_dict_words -- average total of dictionary words in an article
+
+- prop_uniq_dict - of dictionary words in an article, what proportion of the words are unique? (average)
+- prop_uniq - of total words in an article, what proportion of the words are unique? (average)
+- prop_dict_words - of total words in an article, what proportion of the words are in a dictionary? (average)
+
+
+```{r}
+df_unigrams <- df %>%
+  unnest_tokens(unigram, body_lem_title, token = "ngrams", n = 1)
+```
+
+
+
+*************************************
+
+```{r}
+#sequence of articles
+df_seq <- df %>%
+  arrange(year, month) %>%
+  # filter(!is.na(year)) %>%
+  mutate(article_seq = row_number())
+
+#tokenize 
+tidy_df_seq <- df_seq %>%
+  unnest_tokens(word, body_stem_title) 
+```
+
+```{r}
+tidy_df_seq %>%
+  filter(Idioma=="Espanhol", !is.na(word)) %>%
+  count(word, sort=T) %>%
+  mutate(prop = (n/sum(n)) ) %>%
+  head(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#314CB6") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top title words, Spanish</span>")
+```
+
+
+
+```{r}
+tidy_df_seq %>%
+  filter(Idioma!="Espanhol",  !is.na(word)) %>%
+  count(word, sort=T) %>%
+  head(10) %>%
+  # filter(n > 100) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col(fill="#CD5334") +
+  xlab(NULL) +
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  ggtitle("<span style = 'color:black'>Top title words, Portuguese</span>")
+```
+
+
+**************************
+
+
+```{r}
+#sequence of articles
+df_seq <- df %>%
+  arrange(year, month) %>%
+  # filter(!is.na(year)) %>%
+  mutate(article_seq = row_number())
+
+#tokenize and remove stop words
+tidy_df_seq <- df_seq %>%
+  unnest_tokens(word, text) %>%
+  mutate(word = str_extract(word, "[a-z']+"),
+         word = str_replace_all(word, pattern="'", "")) %>%
+  anti_join(stop_words, by="word") 
+
+#stemming
+library(SnowballC)
+tidy_df_seq_stem <- tidy_df_seq %>%
+  mutate(word = wordStem(word))
+```
+
+
+```{r}
+df %>%
+  group_by(Idioma) %>%
+  select(year, Idioma) %>%
+  count(year) %>%
+  arrange(year) %>%
+  ggplot(., aes(year,n, fill=as.factor(Idioma))) + 
+    geom_bar(stat = "identity") +
+    theme_classic() + 
+    scale_fill_manual(values=c("#CD5334","#314CB6")) +
+  theme(plot.title = element_markdown(),
+        legend.position = "none") +
+  ggtitle(paste0("<span style = 'color:black'>","Distribution of *df*</span>",
+      " <span style = 'color:#314CB6; font-size:14pt'>**language**</span> ",
+      "<span style = 'color:black'>","and ","</span>",
+      "<span style = 'color:#CD5334; font-size:14pt'>**real**</span> ",
+      "<span style = 'color:black'>",
+      "news articles by year</span>")) +
+  xlab("Year")
+```
+
+```{r}
+df[is.na(df$date),]$year <- "NA"
+df[is.na(df$date),]$month <- "NA"
+
+df %>%
+  group_by(Idioma) %>%
+  select(year,month, Idioma) %>%
+  count(year,month) %>%
+  arrange(year,month) %>%
+  mutate(year_month = paste0(year,"-",month),
+         year_month = ifelse(year_month=="NA-NA","NA",year_month)) %>%
+  ggplot(., aes(year_month,n, fill=as.factor(Idioma))) + 
+    geom_bar(stat = "identity") +
+    theme_classic() + 
+    scale_fill_manual(values=c("#CD5334","#314CB6")) +
+  theme(plot.title = element_markdown(),
+        legend.position = "none"
+        ) +
+  ggtitle(paste0("<span style = 'color:black'>","Distribution of</span>",
+      " <span style = 'color:#314CB6; font-size:14pt'>**Portuguese**</span> ",
+      "<span style = 'color:black'>","and ","</span>",
+      "<span style = 'color:#CD5334; font-size:14pt'>**Spanish**</span> ",
+      "<span style = 'color:black'>",
+      "news articles in the dataset by month</span>"))+
+  theme(axis.text.x = element_text(angle = 45,hjust = 1)) +
+  xlab("Year-Month") 
+```
+
+************************************************************************
+
+By country
+
+```{r}
+df[df$País=="República Dominicana e Colômbia",]$País<- "República Dominicana"
+df[df$País=="Bolívia",]$País<- "Bolívia"
+df[df$País=="Nicarágua",]$País<- "NIcarágua"
+unique(df$País)
+
+df %>%
+  filter(Idioma=="Espanhol") %>%
+  count(País) %>% 
+  ggplot(aes(x = reorder(País, n), y = n)) + 
+  geom_col(fill = "#CD5334") +
+  coord_flip() +
+    theme_classic() + 
+  theme(plot.title = element_markdown(),
+        legend.position = "none"
+        ) +
+  xlab("") + ylab("Count") +
+  ggtitle("Country Sources of Articles in Spanish")
+
+
+df %>%
+  filter(Idioma!="Espanhol") %>%
+  count(País) %>% 
+  ggplot(aes(x = reorder(País, n), y = n)) + 
+  geom_col(fill = "#314CB6") +
+  coord_flip() +
+    theme_classic() + 
+  theme(plot.title = element_markdown(),
+        legend.position = "none"
+        ) +
+  xlab("") + ylab("Count") +
+  ggtitle("Country Sources of Articles in Portuguese")
+```
+
+************************************************************************
+
+By media source
+
+```{r}
+source_df <- read_csv("./output-data/source_count.csv")
+
+source_df %>%
+  filter(Idioma=="Espanhol") %>%
+  count(source) %>% 
+  arrange(desc(n)) %>% 
+  head(7) %>%
+  ggplot(aes(x = reorder(source, n), y = n)) + 
+  geom_col(fill = "#CD5334") +
+  coord_flip() +
+    theme_classic() + 
+  theme(plot.title = element_markdown(),
+        legend.position = "none"
+        ) +
+  xlab("") + ylab("Count") +
+  ggtitle("Top Sources of Articles in Spanish")
+
+
+source_df %>%
+  filter(Idioma!="Espanhol") %>%
+  count(source) %>% 
+  arrange(desc(n)) %>% 
+  head(7) %>%
+  ggplot(aes(x = reorder(source, n), y = n)) + 
+  geom_col(fill = "#314CB6") +
+  coord_flip() +
+    theme_classic() + 
+  theme(plot.title = element_markdown(),
+        legend.position = "none"
+        ) +
+  xlab("") + ylab("Count") +
+  ggtitle("Top Sources of Articles in Portuguese")
+```
+
+
+**************************
+
+### Correlation tests
+
+What is the similarity between words in fake vs real news. Word correlation between those in fake vs real news.
+
+**Pearson Correlation of 87%**
+```{r}
+## count each word per character 
+oc = tidy_df_seq_stem[,c("fake","word")]
+d=  count_(oc, c("fake", "word"))
+
+# make a document term matrix 
+pwdtm = d %>%
+  cast_dtm(fake, word, n)
+
+# make the dtm into a dataframe 
+mpwdtm=as.matrix(pwdtm)
+df.mpwdtm=as.data.frame(mpwdtm)
+
+# make the dtm into a tdm instead #
+t.t = t(mpwdtm)
+
+cor(t.t)
+```
+
+******************
+
+Visualizing word correlations
+
+**Pairwise correlation**
+
+
+```{r}
+library(widyr)
+
+#Counting and correlating among sections
+df_section_words_fake <- df %>%
+  filter(fake==1) %>%
+  mutate(section = row_number()) %>%
+  filter(section > 0) %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word) %>%
+  mutate(word = str_extract(word, "[a-z']+"),
+         word = str_replace_all(word, pattern="'", ""),
+        word = wordStem(word))
+  
+
+###  Pairwise correlation
+word_cors_fake <- df_section_words_fake %>%
+  group_by(word) %>%
+  # filter for at least relatively common words first
+  filter(n() >= 20) %>%
+  pairwise_cor(word, section, sort = TRUE)
+
+suppressMessages(library(igraph))
+library(ggraph)
+set.seed(9)
+
+word_cors_fake %>%
+  filter(correlation > .40) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_classic() +
+  ggtitle("Pairwise correlation > .40 between words in fake news")
+```
+
+******************
+
+```{r}
+#Counting and correlating among sections
+df_section_words_real <- df %>%
+  filter(fake==0) %>%
+  mutate(section = row_number()) %>%
+  filter(section > 0) %>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word) %>%
+  mutate(word = str_extract(word, "[a-z']+"),
+         word = str_replace_all(word, pattern="'", ""),
+        word = wordStem(word))
+  
+
+###  Pairwise correlation
+word_cors_real <- df_section_words_real %>%
+  group_by(word) %>%
+  # filter for at least relatively common words first
+  filter(n() >= 20) %>%
+  pairwise_cor(word, section, sort = TRUE)
+
+suppressMessages(library(igraph))
+library(ggraph)
+set.seed(9)
+
+word_cors_real %>%
+  filter(correlation > .6) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_classic() +
+  ggtitle("Pairwise correlation > .60 between words in real news")
+```
+
+******************
+
+**Bigram correlation (tf-idf)**
+
+
+```{r}
+df_bigrams <- df %>%
+  arrange(year,month) %>%
+  mutate(article_seq = row_number()) %>%
+  unnest_tokens(bigram, body_lem_title, token = "ngrams", n = 2)
+
+# write.csv(df_bigrams,"./output-data/df_bigrams_lem.csv")
+
+#Filtering stop_words
+bigrams_separated <- df_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+#Reunite to find the most common bigrams not containing stop-words
+bigrams_united <- bigrams_separated %>%
+  unite(bigram, word1, word2, sep = " ")
+
+#Look at tf-idf of bigrams by fake news 
+bigram_tf_idf <- bigrams_united %>%
+  count(Idioma, bigram) %>%
+  bind_tf_idf(bigram, Idioma, n) %>%
+  arrange(desc(tf_idf))
+
+
+bigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(bigram = factor(bigram, levels = rev(unique(bigram)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(Idioma) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label =  Idioma) %>% #ifelse(fake==0,"Real","Fake")) %>%
+  ggplot(aes(bigram, tf_idf, fill = as.factor(Idioma))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#CD5334","#314CB6"))
+```
+
+These words are, as measured by tf-idf, the most important bigrams in each news type, meaning these are the top phrases thatmost distinguish fake news from real news articles. 
+
+******************
+
+**unigram correlation (tf-idf)**
+
+
+```{r}
+df_unigrams <- df %>%
+  unnest_tokens(unigram, body_lem_title, token = "ngrams", n = 1)
+
+# #Filtering stop_words
+# unigrams_filtered <- df_unigrams %>%
+#   filter(!unigram %in% stop_words$word) %>%
+#   mutate(unigram = wordStem(unigram))
+
+
+#Look at tf-idf of unigrams by fake news 
+unigram_tf_idf <- df_unigrams %>%
+  count(Idioma, unigram) %>%
+  bind_tf_idf(unigram, Idioma, n) %>%
+  arrange(desc(tf_idf))
+
+
+unigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(unigram = factor(unigram, levels = rev(unique(unigram)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(Idioma) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = Idioma) %>%
+  ggplot(aes(unigram, tf_idf, fill = as.factor(Idioma))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#CD5334","#314CB6"))
+```
+
+This is the unigram version of the plot above. These particular words are the most important to each respective news type. 
+
+******************
+
+**trigram correlation (tf-idf)**
+
+```{r}
+df_trigram <- df %>%
+  arrange(year,month) %>%
+  mutate(article_seq = row_number()) %>%
+  unnest_tokens(trigram, body_lem_title, token = "ngrams", n = 3)
+
+#Filtering stop_words
+trigram_separated <- df_trigram %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ")
+
+
+#Reunite to find the most common bigrams not containing stop-words
+trigram_united <- trigram_separated %>%
+  unite(trigram, word1, word2, word3, sep = " ")
+
+#Look at tf-idf of bigrams by fake news 
+trigram_tf_idf <- trigram_united %>%
+  count(Idioma, trigram) %>%
+  bind_tf_idf(trigram, Idioma, n) %>%
+  arrange(desc(tf_idf))
+
+
+trigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(trigram = factor(trigram, levels = rev(unique(trigram)))) %>% 
+  # filter(character %in% top_char4$character) %>%
+  group_by(Idioma) %>% 
+  top_n(7) %>% 
+  ungroup() %>%
+  mutate(label = Idioma) %>%
+  ggplot(aes(trigram, tf_idf, fill = as.factor(Idioma))) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~label, ncol = 2, scales = "free_y") +
+  coord_flip() +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("#CD5334","#314CB6"))
+```
+
+
+
+
+### Sentiment analysis
+
+******************
+
+For the three plots below:
+
+- each line represents the sentiment of one article.
+- index (x-axis) -- sequence in which articles were released
+- the date is unavailable for articles after the dotted line 
+
+Each line represents the average AFINN score by article.
+
+```{r}
+df_seq[is.na(df_seq$date),]$year <- "NA"
+df_seq[is.na(df_seq$date),]$month <- "NA"
+```
+
+
+
+```{r}
+df_seq %>%
+  filter(Idioma=="Espanhol",
+         body_stem_title_sent!="-") %>%
+  mutate(article_seq = row_number(),
+        body_stem_title_sent = as.numeric(body_stem_title_sent),
+        pos_neg = ifelse(body_stem_title_sent>=.5,1,0),
+        article_seq = ifelse(article_seq>=2608,article_seq+50,article_seq)) %>% 
+ggplot(. , aes(x=article_seq, y =.5, color=as.factor(pos_neg))) +
+         geom_segment(aes(xend=article_seq , yend=body_stem_title_sent)) +
+    theme_classic() + 
+  scale_color_manual(values=c("#CD5334","#314CB6"), name="", 
+                    labels=c("Negative", "Positive")) +
+  theme(legend.position = c(1,0),
+       legend.justification = c(3.6,-8.5),
+       legend.direction="horizontal",
+       legend.text = element_text(size=8)) +
+  geom_vline(xintercept=2608+25, linetype="dashed") +
+  ggtitle("Sentiment of Article Title") +
+  ylab("Sentiment Score") + xlab("Articles Ordered by Date")
+
+df_seq %>%
+  filter(Idioma=="Espanhol",
+         body_stem_title_sent!="-") %>%
+  mutate(body_stem_title_sent = as.numeric(body_stem_title_sent)) %>%
+  select(body_stem_title_sent) %>% pull() %>% mean(.,na.rm=T)
+```
+
+
+```{r}
+df_seq %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  mutate(article_seq = row_number(),
+        body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+        pos_neg = ifelse(body_stem_desc_sent>=.5,1,0),
+        article_seq = ifelse(article_seq>=2608,article_seq+50,article_seq)) %>%
+ggplot(. , aes(x=article_seq, y =.5, color=as.factor(pos_neg))) +
+         geom_segment(aes(xend=article_seq , yend=body_stem_desc_sent)) +
+    theme_classic() + 
+  scale_color_manual(values=c("#CD5334","#314CB6"), name="",
+                    labels=c("Negative", "Positive")) +
+  theme(legend.position = c(1,0),
+       legend.justification = c(3.6,-8.5),
+       legend.direction="horizontal",
+       legend.text = element_text(size=8.5)) +
+  geom_vline(xintercept=2608+25, linetype="dashed") +
+  ggtitle("Sentiment of Article Description") +
+  ylab("Sentiment Score") + xlab("Articles Ordered by Date")
+
+df_seq %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent)) %>%
+  select(body_stem_desc_sent) %>% pull() %>% mean(.,na.rm=T)
+```
+
+
+```{r}
+g1 <- df_seq %>%
+  filter(Idioma=="Espanhol",
+         body_stem_title_sent!="-") %>%
+  mutate(body_stem_title_sent = as.numeric(body_stem_title_sent)) %>%
+  select(body_stem_title_sent) %>% pull()
+
+g2 <- df_seq %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent)) %>%
+  select(body_stem_desc_sent) %>% pull()
+
+t.test(g1, g2)
+```
+
+
+-- sentiment scores by media type, country
+
+```{r}
+df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(País) %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+         body_stem_title_sent = as.numeric(body_stem_title_sent),
+         mean_sent_desc = mean(body_stem_desc_sent),
+         mean_sent_title = mean(body_stem_title_sent)
+         ) %>%
+  select(País, mean_sent_desc) %>% distinct() %>% arrange(desc(mean_sent_desc))
+```
+
+
+TABLE OF MEAN SENTIMENT VALUES BY COUNTRY
+
+```{r}
+df[df$País=="República Dominicana e Colômbia",]$País<- "República Dominicana"
+
+summary_country <- df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(País) %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+         body_stem_title_sent = as.numeric(body_stem_title_sent),
+         mean_sent_desc = round(mean(body_stem_desc_sent),4),
+         mean_sent_title = round(mean(body_stem_title_sent),4)
+         ) %>%
+  select(País, mean_sent_desc, mean_sent_title) %>% distinct() 
+
+DT::datatable(summary_country, options = list(pageLength = 10))
+```
+
+```{r}
+top_countries <- df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(País) %>%
+  count(País) %>% arrange(desc(n)) %>% head(5) %>% pull(País)
+
+df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(País) %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+         body_stem_title_sent = as.numeric(body_stem_title_sent),
+         mean_sent_desc = mean(body_stem_desc_sent),
+         mean_sent_title = mean(body_stem_title_sent)
+         ) %>%
+  select(País, mean_sent_desc, mean_sent_title) %>% distinct() %>%
+  filter(País %in% top_countries) %>%
+   ggplot(.) +
+  geom_segment(aes(x=0,xend=0,y=max(mean_sent_title)+.01,
+                   yend=min(mean_sent_desc)-.01), color="black") +
+    geom_segment(aes(x=1,xend=1,y=max(mean_sent_title)+.01,
+                   yend=min(mean_sent_desc)-.01), color="black") +
+  geom_segment(aes(x=0,xend=1,y=mean_sent_title,yend=mean_sent_desc,
+                   color=as.factor(País)
+                   ),size=.75) +
+  geom_point(aes(0,mean_sent_title,color=as.factor(País))) +
+  geom_point(aes(1,mean_sent_desc,color=as.factor(País))) +
+  geom_text(aes(-.08, mean_sent_title, label=País, color=as.factor(País)), size=3.5) +
+  geom_text(aes(1.08, mean_sent_desc, label=País, color=as.factor(País)), size=3.5,
+            position=position_jitter(width=.002,height=.002)) +
+  geom_text(aes(x=0,y=.48,label="Mean Title Score"),size=3.5) +
+  geom_text(aes(x=1,y=.481,label="Mean Description\nScore"), size=3.5) +
+  theme_bw() +
+  theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+        plot.background = element_rect(fill = "white", color=NA),
+        panel.background = element_rect(fill = NA, color=NA),
+        legend.position = "none") + ylab("Mean Sentiment Score") + xlab("") +
+  xlim(-.2,1.2) +
+  ggtitle("Differences in Title and Description Mean Sentiment Scores by Country") +
+  ggsave("plot.png")
+
+```
+
+
+```{r}
+library(ggrepel)
+df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(País) %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+         body_stem_title_sent = as.numeric(body_stem_title_sent),
+         mean_sent_desc = mean(body_stem_desc_sent),
+         mean_sent_title = mean(body_stem_title_sent)
+         ) %>%
+  select(País, mean_sent_desc, mean_sent_title) %>% distinct() %>%
+  filter(País %in% c(c("NIcarágua", "Guatemala", "Brasil"), top_countries)) %>%
+   ggplot(.) +
+  geom_segment(aes(x=0,xend=0,y=max(mean_sent_title)+.01,
+                   yend=min(mean_sent_desc)-.01), color="black") +
+    geom_segment(aes(x=1,xend=1,y=max(mean_sent_title)+.01,
+                   yend=min(mean_sent_desc)-.01), color="black") +
+  geom_segment(aes(x=0,xend=1,y=mean_sent_title,yend=mean_sent_desc,
+                   color=as.factor(País)
+                   ),size=.75) +
+  geom_point(aes(0,mean_sent_title,color=as.factor(País))) +
+  geom_point(aes(1,mean_sent_desc,color=as.factor(País))) +
+  geom_label_repel(aes(-.06, mean_sent_title, label=País, color=as.factor(País)), size=3.1,
+                   nudge_x = 0.04, direction = "y", hjust = "right") +
+  geom_label_repel(aes(1.02, mean_sent_desc, label=País, color=as.factor(País)), size=3.1,
+                   nudge_x = 0.04, direction = "y", hjust = "left") +
+  geom_text(aes(x=0,y=.62,label="Mean Title Score"),size=3.5) +
+  geom_text(aes(x=1,y=.62,label="Mean Description\nScore"), size=3.5) +
+  theme_bw() +
+  theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+        plot.background = element_rect(fill = "white", color=NA),
+        panel.background = element_rect(fill = NA, color=NA),
+        legend.position = "none") + ylab("Mean Sentiment Score") + xlab("") +
+  xlim(-.2,1.2) +
+  ggtitle("Differences in Title and Description Mean Sentiment Scores by Country") +
+  ggsave("plot2.png")
+```
+
+
+
+
+```{r}
+df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(País) %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+         body_stem_title_sent = as.numeric(body_stem_title_sent),
+         mean_sent_desc = mean(body_stem_desc_sent),
+         mean_sent_title = mean(body_stem_title_sent)
+         ) %>%
+  select(País, mean_sent_desc, mean_sent_title) %>% distinct() %>%
+   ggplot(.) +
+    geom_segment(aes(x=0,xend=0,y=max(mean_sent_title)+.02,
+                   yend=min(mean_sent_desc)-.02), color="black") +
+    geom_segment(aes(x=1,xend=1,y=max(mean_sent_title)+.02,
+                   yend=min(mean_sent_desc)-.02), color="black") +
+  geom_segment(aes(x=0,xend=1,y=mean_sent_title,yend=mean_sent_desc,
+                   color=as.factor(País)
+                   ),size=.75) +
+  geom_point(aes(0,mean_sent_title,color=as.factor(País))) +
+  geom_point(aes(1,mean_sent_desc,color=as.factor(País))) +
+  geom_text(aes(-.06, mean_sent_title, label=País), size=2,
+            position=position_jitter(width=.03,height=0)) +
+  theme_void()
+```
+
+
+
+```{r}
+top_media <- source_df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(source) %>%
+  count(source) %>% arrange(desc(n)) %>% head(8) %>% pull(source)
+
+source_df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(source) %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+         body_stem_title_sent = as.numeric(body_stem_title_sent),
+         mean_sent_desc = mean(body_stem_desc_sent),
+         mean_sent_title = mean(body_stem_title_sent)
+         ) %>%
+  select(source, mean_sent_desc, mean_sent_title) %>% distinct() %>%
+  filter(source %in% top_media) %>%
+   ggplot(.) +
+  geom_segment(aes(x=0,xend=0,y=max(mean_sent_title)+.01,
+                   yend=min(mean_sent_desc)-.01), color="black") +
+    geom_segment(aes(x=1,xend=1,y=max(mean_sent_title)+.01,
+                   yend=min(mean_sent_desc)-.01), color="black") +
+  geom_segment(aes(x=0,xend=1,y=mean_sent_title,yend=mean_sent_desc,
+                   color=as.factor(source)
+                   ),size=.75) +
+  geom_point(aes(0,mean_sent_title,color=as.factor(source))) +
+  geom_point(aes(1,mean_sent_desc,color=as.factor(source))) +
+  geom_text(data=l,aes(1.08, first_txt, label=source, color=as.factor(source)), size=3.5) +
+  geom_text(aes(x=0,y=.47,label="Mean Title Score"),size=3.5) +
+  geom_text(aes(x=1,y=.471,label="Mean Description\nScore"), size=3.5) +
+  theme_bw() +
+  theme(axis.ticks = element_blank(), axis.text.x = element_blank(),
+        plot.background = element_rect(fill = "white", color=NA),
+        panel.background = element_rect(fill = NA, color=NA),
+        legend.position = "none") + ylab("Mean Sentiment Score") + xlab("") +
+  xlim(-.2,1.2) +
+  ggtitle("Differences in Title and Description Mean Sentiment Scores by Source") +
+  ggsave("plot-media.png")
+
+
+l <- source_df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-",
+         source %in% top_media) %>%
+  group_by(source) %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+         body_stem_title_sent = as.numeric(body_stem_title_sent),
+         mean_sent_desc = mean(body_stem_desc_sent),
+         mean_sent_title = mean(body_stem_title_sent)
+         ) %>%
+  select(source, mean_sent_desc, mean_sent_title) %>% distinct() %>%
+  cbind(.,first_txt = c(.372, .365, .405, .347, .38, .375, .4, .342),
+        sec_txt = c(.447, .436, 0.433, .41, .45, .441, .458, .428))
+```
+
+
+TABLE OF MEAN SENTIMENT VALUES BY SOURCE
+
+```{r}
+summary_source <- source_df %>%
+  filter(Idioma=="Espanhol",
+         body_stem_desc_sent!="-") %>%
+  group_by(source) %>%
+  mutate(body_stem_desc_sent = as.numeric(body_stem_desc_sent),
+         body_stem_title_sent = as.numeric(body_stem_title_sent),
+         mean_sent_desc = round(mean(body_stem_desc_sent),4),
+         mean_sent_title = round(mean(body_stem_title_sent),4)
+         ) %>%
+  select(source, mean_sent_desc, mean_sent_title) %>% distinct()
+
+DT::datatable(summary_source, options = list(pageLength = 10))
+```
+
+

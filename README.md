@@ -82,3 +82,18 @@ Project files:
 
 - project3.html
   - knitted output file from project3.Rmd 
+  
+  
+  *******************************************************
+
+### Final Project - "Lost in Translation" (group project)
+
+Most of the research on misinformation focuses on English, and very little attention has been put to other languages, such as Spanish which is the third most spoken language in the world. This project explores misinformation and fake news inSpanish and Portuguese speaking countries.
+
+We prepare the text in two fashions: one, keeping the text in the original language and running the textual analysis, and two, translating the text to English then running the analysis. Through this, we are able to examine how much of the narrative is “lost in translation.”
+
+We found similar results with topic modeling, however disparate results with regard to sentiment scores, highlighting the care researchers should take with both translating texts and utilizing sentiment analysis.
+
+Project files include the code and data I used. I prepared the text data and did analysis on the Spanish text. Spanish-speaking team members validated the results.
+
+
